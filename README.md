@@ -1,8 +1,8 @@
-# Viscanon 0.1.3
+# Viscanon 0.1.4
 
 Reveal artwork or share a memory in Viscanon, and it opens as a native image window for everyone connected to your Foundry world. GMs and players share memories using Viscanon’s existing controls. The module receives only artwork the campaign currently permits them to share.
 
-Version 0.1.3 fixes a browser-only connection failure. Native fetch and timer functions now retain their browser receiver when the bridge invokes them. Receiver regression tests and a native Chromium test cover pairing, polling, artwork delivery and cleanup before publishing. The navy connection banner and bundled white Viscanon logo are retained.
+Version 0.1.4 gives a connected world a subtle green status and a checkmark. Viscanon artwork opens without surrounding content padding or image margins, keeping the native titlebar, resizing and full image aspect ratio. The browser connection fix from 0.1.3 is retained.
 
 ## Installation
 
@@ -32,7 +32,7 @@ This version opens artwork windows. It does not create journals, actors, tokens,
 
 ## Compatibility and verification
 
-The module targets Foundry VTT 13 and 14 and uses the public `foundry.applications.apps.ImagePopout` and `ApplicationV2` APIs. Installation and the branded connection settings have been confirmed in a licensed Foundry runtime. Its protocol and client behavior also have automated API-mock coverage, strict browser receiver tests and native Chromium coverage. An end-to-end test of Viscanon reveals and shared Memories with a GM and player is still pending. The manifest does not claim a verified Foundry build.
+The module targets Foundry VTT 13 and 14 and uses the public `foundry.applications.apps.ImagePopout` and `ApplicationV2` APIs. Installation, the branded connection settings and a revealed image have been confirmed in a licensed Foundry runtime. Its protocol and client behavior also have automated API-mock coverage, strict browser receiver tests and native Chromium coverage. An end-to-end test of Viscanon reveals and shared Memories with a GM and player is still pending. The manifest does not claim a verified Foundry build.
 
 Installing the module alone does not activate the Viscanon service. The campaign connection controls and bridge service must be available in Viscanon.
 

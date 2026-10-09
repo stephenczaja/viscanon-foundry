@@ -8,6 +8,13 @@ const config = () => ({
   checkpoint: game.settings.get(MODULE_ID, 'checkpoint')
 });
 
+function updateStatusElement(element) {
+  const status = bridge?.status ?? { state: 'starting', message: 'The world is starting. Try again when it is ready.' };
+  element.dataset.state = status.state;
+  element.querySelector('.viscanon-bridge-status-message').textContent = status.message;
+  element.querySelector('.viscanon-bridge-status-check').hidden = status.state !== 'connected';
+}
+
 async function connect(code) {
   if (!game.user?.isGM) throw new Error('Only a GM can connect Viscanon.');
   const checked = await bridge.testCode(normalizeCode(code));
@@ -54,7 +61,14 @@ function createSettingsApplication() {
       status.className = 'viscanon-bridge-status';
       status.setAttribute('role', 'status');
       status.setAttribute('aria-live', 'polite');
-      status.textContent = bridge?.status.message ?? 'The world is starting. Try again when it is ready.';
+      const message = document.createElement('span');
+      message.className = 'viscanon-bridge-status-message';
+      const check = document.createElement('span');
+      check.className = 'viscanon-bridge-status-check';
+      check.setAttribute('aria-hidden', 'true');
+      check.textContent = '✓';
+      status.append(message, check);
+      updateStatusElement(status);
       const label = document.createElement('label');
       label.textContent = 'Connection code';
       label.htmlFor = 'viscanon-bridge-code';
@@ -120,10 +134,7 @@ function createSettingsApplication() {
 
     updateStatus() {
       const status = this.element?.querySelector('.viscanon-bridge-status');
-      if (status) {
-        status.textContent = bridge.status.message;
-        status.dataset.state = bridge.status.state;
-      }
+      if (status) updateStatusElement(status);
     }
 
     _onClose(options) {
@@ -164,7 +175,9 @@ Hooks.once('ready', () => {
     },
     broadcast: packet => game.socket.emit(SOCKET_NAME, packet),
     display: async event => {
-      await new foundry.applications.apps.ImagePopout({
+      const ImagePopout = foundry.applications.apps.ImagePopout;
+      await new ImagePopout({
+        classes: [...(ImagePopout.DEFAULT_OPTIONS?.classes ?? []), 'viscanon-bridge-artwork'],
         src: event.imageUrl, showTitle: true, window: { title: event.title }
       }).render({ force: true });
     },
