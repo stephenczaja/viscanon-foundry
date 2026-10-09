@@ -63,8 +63,8 @@ export class BridgeHttpError extends Error {
 /** Foundry integration is injected so multi-client behavior can be tested without a licensed runtime. */
 export class BridgeController {
   constructor({ getConfig, isCoordinator, saveCheckpoint, broadcast, display, onStatus = () => {},
-    fetchImpl = globalThis.fetch, endpoint = DEFAULT_ENDPOINT, now = () => Date.now(),
-    setTimer = setTimeout, clearTimer = clearTimeout, isOnline = () => globalThis.navigator?.onLine !== false }) {
+    fetchImpl = globalThis.fetch.bind(globalThis), endpoint = DEFAULT_ENDPOINT, now = () => Date.now(),
+    setTimer = globalThis.setTimeout.bind(globalThis), clearTimer = globalThis.clearTimeout.bind(globalThis), isOnline = () => globalThis.navigator?.onLine !== false }) {
     Object.assign(this, { getConfig, isCoordinator, saveCheckpoint, broadcast, display, onStatus,
       fetchImpl, endpoint, now, setTimer, clearTimer, isOnline });
     this.generation = 0;
