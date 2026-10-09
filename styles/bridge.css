@@ -1,0 +1,13 @@
+.viscanon-bridge-settings { max-width: calc(100vw - 24px); }
+.viscanon-bridge-settings .window-content { padding: 0; }
+.viscanon-bridge-settings .viscanon-bridge-content { width: 100%; }
+.viscanon-bridge-settings .viscanon-bridge-body { padding: 16px; box-sizing: border-box; }
+.viscanon-bridge-settings .viscanon-bridge-banner { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 108px; box-sizing: border-box; padding: 14px 16px; background: #0d1422; overflow: hidden; }
+.viscanon-bridge-settings .viscanon-bridge-logo { display: block; width: 160px; max-width: 100%; height: auto; max-height: 81px; object-fit: contain; border: 0; box-shadow: none; }
+.viscanon-bridge-settings p { line-height: 1.45; margin: 0 0 14px; }
+.viscanon-bridge-settings label { display: block; margin-bottom: 6px; font-weight: 600; }
+.viscanon-bridge-settings input { width: 100%; margin-bottom: 14px; }
+.viscanon-bridge-settings .viscanon-bridge-status { padding: 10px; background: rgb(127 127 127 / 12%); border-radius: 6px; }
+.viscanon-bridge-settings .viscanon-bridge-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.viscanon-bridge-settings .viscanon-bridge-buttons button { flex: 1 1 100px; }
+.viscanon-bridge-settings .viscanon-bridge-note { font-size: 0.85em; opacity: 0.85; margin-bottom: 0; }

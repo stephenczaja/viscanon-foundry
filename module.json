@@ -1,0 +1,15 @@
+{
+  "id": "viscanon-bridge",
+  "title": "Viscanon",
+  "description": "Show Viscanon reveals and shared memories to everyone connected to your Foundry world.",
+  "version": "0.1.2",
+  "authors": [{ "name": "Viscanon", "url": "https://viscanon.com" }],
+  "compatibility": { "minimum": "13", "maximum": "14" },
+  "esmodules": ["scripts/viscanon-bridge.mjs"],
+  "styles": ["styles/bridge.css"],
+  "socket": true,
+  "url": "https://github.com/stephenczaja/viscanon-foundry",
+  "manifest": "https://raw.githubusercontent.com/stephenczaja/viscanon-foundry/main/module.json",
+  "download": "https://github.com/stephenczaja/viscanon-foundry/releases/download/v0.1.2/viscanon-bridge.zip",
+  "readme": "README.md"
+}

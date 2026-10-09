@@ -1,0 +1,72 @@
+name: Release Foundry module
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - module.json
+      - README.md
+      - scripts/**
+      - styles/**
+      - assets/**
+      - package.mjs
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: viscanon-foundry-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'stephenczaja/viscanon-foundry' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build the module-only archive
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check package.mjs
+          node package.mjs "$RUNNER_TEMP/viscanon-release/viscanon-bridge.zip"
+          cp module.json "$RUNNER_TEMP/viscanon-release/module.json"
+          version="$(node -p "JSON.parse(require('node:fs').readFileSync('module.json', 'utf8')).version")"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+          printf 'Viscanon %s for Foundry VTT 13 and 14.\n\nInstall using the stable manifest URL:\nhttps://raw.githubusercontent.com/stephenczaja/viscanon-foundry/main/module.json\n' "$version" > "$RUNNER_TEMP/viscanon-release/notes.md"
+      - name: Publish a new version without replacing existing releases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ steps.package.outputs.version }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          tag="v${RELEASE_VERSION}"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            printf '::error::Release %s already exists. Increment module.json version; existing assets will not be changed.\n' "$tag"
+            exit 1
+          fi
+          if gh api "repos/${GH_REPO}/git/ref/tags/${tag}" > /dev/null 2>&1; then
+            printf '::error::Tag %s already exists. Resolve it separately or choose a new version.\n' "$tag"
+            exit 1
+          fi
+          # gh attaches both assets before publishing, including with release immutability enabled.
+          gh release create "$tag" \
+            "$RUNNER_TEMP/viscanon-release/viscanon-bridge.zip" \
+            "$RUNNER_TEMP/viscanon-release/module.json" \
+            --target "$RELEASE_COMMIT" \
+            --title "Viscanon ${RELEASE_VERSION}" \
+            --notes-file "$RUNNER_TEMP/viscanon-release/notes.md"
