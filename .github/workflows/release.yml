@@ -2,7 +2,7 @@ name: Release Foundry module
 
 on:
   push:
-    branches: [main]
+    branches: ['**']
     paths:
       - module.json
       - README.md
@@ -10,6 +10,7 @@ on:
       - styles/**
       - assets/**
       - package.mjs
+      - test/**
       - .github/workflows/release.yml
   workflow_dispatch:
 
@@ -21,7 +22,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install native browser test tooling
+        run: |
+          npm install --no-save --ignore-scripts --package-lock=false playwright@1.63.0
+          npx playwright install --with-deps chromium
+      - name: Check native browser receivers and delivery
+        env:
+          VISCANON_LEGACY_REF: 78699556735041133f12884826a362158ed21146
+        run: node --test test/*.test.mjs
+      - name: Validate the module-only archive
+        run: node package.mjs "$RUNNER_TEMP/viscanon-validation/viscanon-bridge.zip"
   release:
+    needs: verify
     if: github.repository == 'stephenczaja/viscanon-foundry' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
