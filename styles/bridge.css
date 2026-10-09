@@ -7,7 +7,15 @@
 .viscanon-bridge-settings p { line-height: 1.45; margin: 0 0 14px; }
 .viscanon-bridge-settings label { display: block; margin-bottom: 6px; font-weight: 600; }
 .viscanon-bridge-settings input { width: 100%; margin-bottom: 14px; }
-.viscanon-bridge-settings .viscanon-bridge-status { padding: 10px; background: rgb(127 127 127 / 12%); border-radius: 6px; }
+.viscanon-bridge-settings .viscanon-bridge-status { display: flex; align-items: center; gap: 12px; padding: 10px; background: rgb(127 127 127 / 12%); border-radius: 6px; }
+.viscanon-bridge-settings .viscanon-bridge-status-message { flex: 1; min-width: 0; }
+.viscanon-bridge-settings .viscanon-bridge-status[data-state="connected"] { background: rgb(74 163 94 / 14%); box-shadow: inset 0 0 0 1px rgb(74 163 94 / 24%); }
+.viscanon-bridge-settings .viscanon-bridge-status-check { flex: 0 0 auto; color: #65b77d; font-size: 1.25em; font-weight: 700; line-height: 1; }
+.viscanon-bridge-settings .viscanon-bridge-status-check[hidden] { display: none; }
 .viscanon-bridge-settings .viscanon-bridge-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 .viscanon-bridge-settings .viscanon-bridge-buttons button { flex: 1 1 100px; }
 .viscanon-bridge-settings .viscanon-bridge-note { font-size: 0.85em; opacity: 0.85; margin-bottom: 0; }
+
+.application.viscanon-bridge-artwork .window-content { padding: 0 !important; margin: 0; gap: 0; }
+.application.viscanon-bridge-artwork .window-content figure { padding: 0; margin: 0; }
+.application.viscanon-bridge-artwork .window-content img { display: block; padding: 0; margin: 0; border: 0; object-fit: contain; }
