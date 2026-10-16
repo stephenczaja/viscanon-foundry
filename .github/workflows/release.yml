@@ -9,10 +9,19 @@ on:
       - scripts/**
       - styles/**
       - assets/**
+      - templates/**
+      - lang/**
+      - fonts/**
       - package.mjs
       - test/**
       - .github/workflows/release.yml
   workflow_dispatch:
+    inputs:
+      publish_versioned:
+        description: 'Publish this reviewed branch as a versioned release before promoting the stable manifest'
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
@@ -25,6 +34,8 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      manifest_changed: ${{ steps.manifest_change.outputs.changed }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,9 +54,25 @@ jobs:
         run: node --test test/*.test.mjs
       - name: Validate the module-only archive
         run: node package.mjs "$RUNNER_TEMP/viscanon-validation/viscanon-bridge.zip"
+      - name: Detect a stable manifest change
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: manifest_change
+        shell: bash
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ "$BEFORE" =~ ^0+$ ]] || ! git diff --quiet "$BEFORE" "$GITHUB_SHA" -- module.json; then
+            printf 'changed=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'changed=false\n' >> "$GITHUB_OUTPUT"
+          fi
   release:
     needs: verify
-    if: github.repository == 'stephenczaja/viscanon-foundry' && github.ref == 'refs/heads/main'
+    if: >-
+      github.repository == 'stephenczaja/viscanon-foundry' &&
+      ((github.event_name == 'workflow_dispatch' && inputs.publish_versioned == true && startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main') ||
+       (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.verify.outputs.manifest_changed == 'true'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -67,8 +94,16 @@ jobs:
           cp module.json "$RUNNER_TEMP/viscanon-release/module.json"
           version="$(node -p "JSON.parse(require('node:fs').readFileSync('module.json', 'utf8')).version")"
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
-          printf 'Viscanon %s for Foundry VTT 13 and 14.\n\nInstall using the stable manifest URL:\nhttps://raw.githubusercontent.com/stephenczaja/viscanon-foundry/main/module.json\n' "$version" > "$RUNNER_TEMP/viscanon-release/notes.md"
-      - name: Publish a new version without replacing existing releases
+          node --input-type=module > "$RUNNER_TEMP/viscanon-release/notes.md" <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const manifest = JSON.parse(readFileSync('module.json', 'utf8'));
+          const {minimum, maximum} = manifest.compatibility;
+          const versions = minimum === maximum ? minimum : `${minimum}–${maximum}`;
+          console.log(`Viscanon ${manifest.version} for Foundry VTT ${versions}.\n`);
+          console.log(`Install using the stable manifest URL:\n${manifest.manifest}`);
+          NODE
+      - name: Stage a new version before changing the stable manifest
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -93,3 +128,19 @@ jobs:
             --target "$RELEASE_COMMIT" \
             --title "Viscanon ${RELEASE_VERSION}" \
             --notes-file "$RUNNER_TEMP/viscanon-release/notes.md"
+      - name: Verify published assets are exactly this source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v${RELEASE_VERSION}"
+          downloaded="$RUNNER_TEMP/viscanon-published"
+          mkdir -p "$downloaded"
+          gh release download "$tag" --pattern 'viscanon-bridge.zip' --dir "$downloaded"
+          gh release download "$tag" --pattern 'module.json' --dir "$downloaded"
+          cmp "$RUNNER_TEMP/viscanon-release/viscanon-bridge.zip" "$downloaded/viscanon-bridge.zip"
+          cmp "$RUNNER_TEMP/viscanon-release/module.json" "$downloaded/module.json"
+          sha256sum "$downloaded/viscanon-bridge.zip" "$downloaded/module.json"

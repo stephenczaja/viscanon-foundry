@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, lstatSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, lstatSync, existsSync } from 'node:fs';
 import { dirname, join, relative, resolve, isAbsolute, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -14,22 +14,29 @@ if (outputRelative !== '..' && !outputRelative.startsWith(`..${sep}`) && !isAbso
   throw new Error('Choose an output path outside this repository.');
 }
 
-// A fixed allowlist keeps .git, .github, releases and build scripts out of install ZIPs.
+// Include every runtime file in these module directories. A directory allowlist
+// excludes tests, repository metadata, and release tooling without silently
+// dropping new runtime scripts or images from an install ZIP.
+const runtimeDirectories = ['scripts', 'styles', 'assets', 'templates', 'lang', 'fonts'];
+const collectFiles = (relativePath) => {
+  if (relativePath.split('/').some(part => part.startsWith('.'))) {
+    throw new Error(`Refusing hidden runtime path: ${relativePath}`);
+  }
+  const path = join(root, relativePath);
+  const stat = lstatSync(path);
+  if (stat.isSymbolicLink()) throw new Error(`Refusing symbolic link: ${relativePath}`);
+  if (stat.isFile()) return [relativePath];
+  if (!stat.isDirectory()) throw new Error(`Unsupported runtime path: ${relativePath}`);
+  return readdirSync(path).sort().flatMap(name => collectFiles(`${relativePath}/${name}`));
+};
 const files = [
   'README.md',
   'module.json',
-  'scripts/bridge-core.mjs',
-  'scripts/viscanon-bridge.mjs',
-  'styles/bridge.css',
-  'assets/viscanon-mark-white.svg'
+  ...runtimeDirectories.flatMap(dir => existsSync(join(root, dir)) ? collectFiles(dir) : [])
 ];
-for (const file of files) {
-  let path = root;
-  for (const part of file.split('/')) {
-    path = join(path, part);
-    if (lstatSync(path).isSymbolicLink()) throw new Error(`Refusing symbolic link: ${file}`);
-  }
-  if (!lstatSync(path).isFile()) throw new Error(`Missing module file: ${file}`);
+if (files.length <= 2) throw new Error('No module runtime files found.');
+for (const file of ['README.md', 'module.json']) {
+  if (!lstatSync(join(root, file)).isFile()) throw new Error(`Missing module file: ${file}`);
 }
 
 const manifest = JSON.parse(readFileSync(join(root, 'module.json'), 'utf8'));
@@ -38,16 +45,19 @@ if (manifest.id !== 'viscanon-bridge' || !/^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)
   throw new Error('Unexpected module ID or version.');
 }
 if (manifest.url !== repository
-  || manifest.manifest !== 'https://raw.githubusercontent.com/stephenczaja/viscanon-foundry/main/module.json'
+  || manifest.manifest !== 'https://foundry.viscanon.com/module.json'
   || manifest.download !== `${repository}/releases/download/v${manifest.version}/viscanon-bridge.zip`) {
-  throw new Error('Manifest URLs must point to this version in the public repository.');
+  throw new Error('Manifest URLs must point to the branded stable manifest and this versioned public release.');
 }
-if (JSON.stringify(manifest.esmodules) !== JSON.stringify(['scripts/viscanon-bridge.mjs'])
-  || JSON.stringify(manifest.styles) !== JSON.stringify(['styles/bridge.css'])
+if (!Array.isArray(manifest.esmodules) || manifest.esmodules.length === 0
+  || !Array.isArray(manifest.styles) || manifest.styles.length === 0
   || manifest.socket !== true || manifest.readme !== 'README.md') {
   throw new Error('Unexpected module entry points.');
 }
-for (const file of files.filter(file => file.endsWith('.mjs'))) {
+for (const file of [...manifest.esmodules, ...manifest.styles, manifest.readme]) {
+  if (!files.includes(file)) throw new Error(`Missing manifest entry point: ${file}`);
+}
+for (const file of files.filter(file => /\.[cm]?js$/.test(file))) {
   execFileSync(process.execPath, ['--check', join(root, file)], {stdio: 'inherit'});
 }
 
