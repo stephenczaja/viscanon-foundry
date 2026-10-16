@@ -1,8 +1,8 @@
 {
   "id": "viscanon-bridge",
   "title": "Viscanon",
-  "description": "Show Viscanon reveals and shared memories to everyone connected to your Foundry world.",
-  "version": "0.1.4",
+  "description": "Show Viscanon reveals and send artwork, map pins, scenes, and actor portraits to your Foundry world.",
+  "version": "0.2.2",
   "authors": [
     {
       "name": "Viscanon",
@@ -21,7 +21,7 @@
   ],
   "socket": true,
   "url": "https://github.com/stephenczaja/viscanon-foundry",
-  "manifest": "https://raw.githubusercontent.com/stephenczaja/viscanon-foundry/main/module.json",
-  "download": "https://github.com/stephenczaja/viscanon-foundry/releases/download/v0.1.4/viscanon-bridge.zip",
+  "manifest": "https://foundry.viscanon.com/module.json",
+  "download": "https://github.com/stephenczaja/viscanon-foundry/releases/download/v0.2.2/viscanon-bridge.zip",
   "readme": "README.md"
 }
