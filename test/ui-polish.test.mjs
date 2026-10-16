@@ -15,7 +15,7 @@ class Element {
   querySelector(selector) { return this.querySelectorAll(selector)[0] ?? null; }
 }
 
-test('connection success is correct on first render, resets after invalidation, and artwork keeps native popout classes', async () => {
+test('a legacy artwork connection stays partial, resets after invalidation, and keeps native popout classes', async () => {
   const keys = ['Hooks', 'game', 'foundry', 'document', 'addEventListener', 'fetch', 'ui'];
   const originals = Object.fromEntries(keys.map(key => [key, globalThis[key]]));
   const hooks = new Map();
@@ -79,9 +79,11 @@ test('connection success is correct on first render, resets after invalidation, 
     status = application.element.querySelector('.viscanon-bridge-status');
     const message = status.querySelector('.viscanon-bridge-status-message');
     const check = status.querySelector('.viscanon-bridge-status-check');
-    assert.equal(status.dataset.state, 'connected', 'a freshly opened settings window already reflects its connection');
+    assert.equal(status.dataset.state, 'connected', 'a freshly opened settings window already reflects its artwork connection');
+    assert.equal(status.dataset.capability, 'partial');
     assert.equal(message.textContent, module.api.status.message);
-    assert.equal(check.hidden, false);
+    assert.match(message.textContent, /Send to Foundry is unavailable/);
+    assert.equal(check.hidden, true, 'a read-only legacy code must not show full pairing success');
     assert.equal(check.textContent, '✓');
     assert.equal(check.attributes.get('aria-hidden'), 'true');
     assert.equal(status.attributes.get('role'), 'status');
