@@ -49,7 +49,8 @@ export function validateDisplayEvent(event, { endpoint = DEFAULT_ENDPOINT, now =
   const imageUrl = safeArtworkUrl(event.item.image, endpoint);
   if (!imageUrl || typeof event.item.title !== 'string') return null;
   const title = event.item.title.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 240) || 'Viscanon artwork';
-  return { id: event.id, sequence: event.sequence, imageUrl, title, expiresAt };
+  return { id: event.id, sequence: event.sequence, campaignId: event.campaignId,
+    itemId: event.item.id, type: event.type, imageUrl, title, expiresAt };
 }
 
 export class BridgeHttpError extends Error {

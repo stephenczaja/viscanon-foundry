@@ -1,66 +1,42 @@
-# Viscanon 0.1.4
+# Viscanon Foundry module 0.2.2 receive-window candidate
 
-Reveal artwork or share a memory in Viscanon, and it opens as a native image window for everyone connected to your Foundry world. GMs and players share memories using Viscanon’s existing controls. The module receives only artwork the campaign currently permits them to share.
+This candidate preserves the 0.1.4 pairing and artwork receiver. It adds GM-only **Send to Foundry** requests for sharing artwork, placing map pins, creating scenes, and attaching artwork to actors. It has not been published or tested in a real Foundry world yet.
 
-Version 0.1.4 gives a connected world a subtle green status and a checkmark. Viscanon artwork opens without surrounding content padding or image margins, keeping the native titlebar, resizing and full image aspect ratio. The browser connection fix from 0.1.3 is retained.
+## Install and connect
 
-## Installation
-
-In Foundry’s Setup screen, open **Add-on Modules > Install Module**, paste this URL into **Manifest URL**, and click **Install**:
+Install the module from the stable manifest URL so Foundry's normal **Update** button can install later releases:
 
 ```text
 https://foundry.viscanon.com/module.json
 ```
 
-Open your world as GM and enable **Viscanon** in **Manage Modules**. The stable manifest URL lets Foundry check for future updates. Each manifest points to its own versioned install ZIP.
+Enable **Viscanon** in the world, then open **Configure Settings > Viscanon** as GM. Paste the campaign artwork connection code as before. Viscanon reveals and shared memories continue to open native image windows for everyone in the world.
 
-For a manual installation, extract the release ZIP so `viscanon-bridge/module.json` is inside Foundry’s `Data/modules` folder. Restart Foundry, then enable the module in the world.
+For Send to Foundry, create a **GM workspace code** in the same Viscanon campaign and paste it into the new field. This second code is saved only in that GM's browser, not as a world setting or in module socket messages. Each GM browser that may become the active GM needs its own saved copy. The browser's workspace status shows whether this connection is active. Keep the code private and clear it from a shared browser.
 
-## Connect your campaign
+When Viscanon sends an entry, the active GM gets a Foundry popup with four actions:
 
-In Viscanon, open the campaign’s settings and create a Foundry connection code. In Foundry, open **Configure Settings > Viscanon > Connect to Viscanon**, paste the code, and click **Connect**. No Viscanon login is needed inside Foundry. Reveal an entry or share a memory in Viscanon to show its artwork.
+- **Reveal artwork** copies the image to Foundry storage and shares a native Image Popout with connected players. It does not change Viscanon's reveal state.
+- **Place map pin** lets the GM choose a scene and click a location. The transparent Viscanon eye is linked to an image Journal. **Will appear on reveal** starts GM-only and becomes player-visible after a Viscanon reveal or this popup's local artwork reveal. **GM only** stays hidden. **Visible to players** exposes it immediately with a public or generic title.
+- **Create scene** uses the battlemap image when available, otherwise the entry image. The scene uses its actual image dimensions, a gridless canvas, and a black background. It starts inactive and GM-only.
+- **Attach to actor** searches existing world actors or creates a new actor using a type supported by the game system. Existing player-visible actors require an explicit visibility choice before unrevealed artwork can be attached. A new actor starts GM-only.
 
-Keep at least one GM connected to Foundry. The active GM receives new events every three seconds and forwards their IDs to other clients. Every client checks the event with Viscanon before showing artwork. Both GMs and players see the image. Closing an image window affects only your own view.
+Unrevealed pins and private scenes and actors stay in the neutral **Viscanon** root folder. Pins that the GM explicitly makes visible, or that a fresh Viscanon reveal authorizes, are grouped under neutral **Section** and **Group** folders keyed from stable chapter and entry-category identifiers. Folder names contain neither private titles nor raw Viscanon IDs. This preserves the chapter/category structure for exposed pins, including renames and GM failover, but private document nesting still needs a real player-account test of Foundry folder visibility and metadata. Player-visible pins use the neutral title **Viscanon artwork**; a GM may rename a visible Journal manually.
 
-The code is stored as a world setting, so players in the world can read it. It grants read-only access to this campaign’s bridge. It cannot reveal entries, edit a campaign, generate artwork, or access a Viscanon account session. Revoke it in Viscanon if the world is shared with someone who should lose access to the campaign’s shared artwork. **Disconnect** stops this world from receiving artwork; it does not revoke the code in other worlds.
+Artwork is downloaded from a Viscanon-approved URL into the GM browser's memory when the popup opens because Supabase signed URLs expire. Closing without an action creates no stored file. **Foundry persistent artwork files are public to anyone who can fetch their URLs; random filenames do not make them private.** GM-only and on-reveal pins therefore start with the module's public eye icon and do not upload unrevealed artwork. A matching Viscanon reveal triggers a fresh server authorization check, then uploads the artwork and opens the pin to players. An explicit Reveal, visible pin, scene, or actor action also publishes the chosen artwork file; the popup explains this before saving. Undo hides a matching on-reveal Journal but cannot make an already uploaded Foundry file private again. A failed download or upload is shown in the popup; retry while its link remains valid. Player FilePicker browsing and direct requests to known paths remain publication-blocking world tests.
 
-## Delivery behavior
+**Will appear on reveal** pins are checked against the current Viscanon artwork and shared card while the GM workspace is connected. A matching reveal makes the Journal visible; Undo or replacing the artwork hides it again. The checks catch up after the active GM reconnects. A Foundry-local **Reveal artwork** is an explicit player share in this world and keeps matching pins visible even if the Viscanon reveal is later undone. **Visible to players** pins remain visible until the GM changes or removes them; **GM only** pins remain hidden. A Sent/received indication in Viscanon means the GM popup opened, not that the GM chose an action. Send requires an unconsumed four-second receive window. The response must pass the current-window check before that window ends, and the GM must acknowledge the popup within five seconds of Send. A Send near the end of a window may fail visibly even while the GM is connected. A later receive request cannot replay an unfinished command, even in the same receiver session. An interruption that the original request does not observe can still deliver within those deadlines if its response reaches the GM after the network resumes. A lost acknowledgment can leave the sender uncertain after the popup opened. Test these network races in a real world before release.
 
-A new connection starts at the present moment. Old reveals are not replayed. The delivery position survives reloads and GM failover. Pending events expire after ten minutes. Hidden, unshared, expired, or inaccessible events are skipped. If there is no active GM or the network is interrupted, delivery resumes when the connection returns within that window. Already displayed events are not shown twice during a client session.
+## Compatibility
 
-This version opens artwork windows. It does not create journals, actors, tokens, scenes, maps, or chat messages. Each world connects to one campaign at a time. Shared images must be managed Viscanon artwork or approved artwork bundled with Viscanon.
-
-## Compatibility and verification
-
-The module targets Foundry VTT 13 and 14 and uses the public `foundry.applications.apps.ImagePopout` and `ApplicationV2` APIs. Installation, the branded connection settings and a revealed image have been confirmed in a licensed Foundry runtime. Its protocol and client behavior also have automated API-mock coverage, strict browser receiver tests and native Chromium coverage. An end-to-end test of Viscanon reveals and shared Memories with a GM and player is still pending. The manifest does not claim a verified Foundry build.
-
-Installing the module alone does not activate the Viscanon service. The campaign connection controls and bridge service must be available in Viscanon.
+The manifest declares Foundry 13 through 14. Scene artwork uses v13's `background.src` or v14's `levels[].background.src`. Map pins use Foundry Notes linked to Journal image pages. The native `ImagePopout.shareImage` API broadcasts artwork. The existing test world was Foundry 14 build 364 with DnD5e 5.3.3, but this **0.2.2 candidate has not been accepted there**. Foundry 13 acceptance is pending. Run the manual checklist in the release handoff before publishing.
 
 ## Build an install ZIP
 
-Use Node.js 24 or newer and Python 3. No npm dependencies are required.
+Use Node.js 24 or newer and Python 3. The deterministic packager writes only the allowlisted module files into a `viscanon-bridge/` directory in the archive:
 
 ```sh
 node package.mjs /absolute/output/viscanon-bridge.zip
 ```
 
-The deterministic archive contains exactly six files under `viscanon-bridge/`: the manifest, this README, two runtime scripts, the stylesheet, and the logo. The packager uses an explicit allowlist, so Git metadata, GitHub workflows, build scripts, and release artifacts are excluded. Choose an output path outside the repository.
-
-## Publish a new version
-
-The public repository is [stephenczaja/viscanon-foundry](https://github.com/stephenczaja/viscanon-foundry). Pushing this module-only source to `main` runs the release workflow. It builds the ZIP in the runner’s temporary directory, then creates the versioned release with `viscanon-bridge.zip` and `module.json` attached. It uses the workflow’s `GITHUB_TOKEN`; no external credentials or hosting account are needed. Existing releases and tags are never overwritten.
-
-For later releases, increment `module.json`’s version and update its versioned `download` URL. Keep the `manifest` URL unchanged. Update this README’s version and release description, then push the changes to `main`. The workflow rejects a version that already has a release or tag. Its manual run option provides a retry when a release has not yet been created.
-
-If a run leaves a draft release or tag behind, resolve that separately or use a new version. The workflow will not modify an existing release.
-
-## First Foundry smoke test
-
-1. Enable the module in a test world with one GM and two player browser sessions.
-2. Connect a code from a test Viscanon campaign. Existing reveals should not appear.
-3. Reveal a location, character, or scene with artwork. Each connected user should see one native image window.
-4. Share a GM memory and a player-created memory. Each should show once for every connected Foundry user.
-5. Reload the GM, then reveal another entry. The previous entry should stay closed and the new one should arrive.
-6. Connect a second GM, disconnect the active GM, and reveal another entry. Delivery should continue through the new active GM.
-7. Revoke the code in Viscanon. New artwork should stop arriving. Create and connect a new code to resume.
-8. Disconnect in Foundry. New shares should no longer appear in this world.
+Keep the module's `manifest` field at the stable URL. A release must upload the exact ZIP referenced by `download`, publish the matching stable manifest only after review, and verify Foundry's Update path. The old 0.1.4 ZIP and live stable manifest remain the rollback target until acceptance.
