@@ -5,6 +5,9 @@ import { chromium } from 'playwright';
 
 const runtime = readFileSync(new URL('../scripts/viscanon-bridge.mjs', import.meta.url), 'utf8');
 const core = readFileSync(new URL('../scripts/bridge-core.mjs', import.meta.url), 'utf8');
+const workspaceCore = readFileSync(new URL('../scripts/workspace-core.mjs', import.meta.url), 'utf8');
+const workspaceActions = readFileSync(new URL('../scripts/workspace-actions.mjs', import.meta.url), 'utf8');
+const workspaceUi = readFileSync(new URL('../scripts/workspace-ui.mjs', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('../styles/bridge.css', import.meta.url), 'utf8');
 const origin = 'http://foundry-ui.invalid';
 const endpoint = 'https://xzievefbzeyvefazppvj.supabase.co/functions/v1/foundry-bridge';
@@ -93,6 +96,9 @@ test('native browser renders connected status and scoped artwork spacing without
       if (url === `${origin}/`) return route.fulfill({ contentType: 'text/html', body: html });
       if (url === `${origin}/scripts/viscanon-bridge.mjs`) return route.fulfill({ contentType: 'text/javascript', body: runtime });
       if (url === `${origin}/scripts/bridge-core.mjs`) return route.fulfill({ contentType: 'text/javascript', body: core });
+      if (url === `${origin}/scripts/workspace-core.mjs`) return route.fulfill({ contentType: 'text/javascript', body: workspaceCore });
+      if (url === `${origin}/scripts/workspace-actions.mjs`) return route.fulfill({ contentType: 'text/javascript', body: workspaceActions });
+      if (url === `${origin}/scripts/workspace-ui.mjs`) return route.fulfill({ contentType: 'text/javascript', body: workspaceUi });
       if (url === `${origin}/modules/viscanon-bridge/assets/viscanon-mark-white.svg`) return route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="81"/>' });
       if ([asset('wide'), asset('portrait')].includes(url)) {
         const dimensions = url.includes('portrait') ? 'width="360" height="480"' : 'width="640" height="360"';
