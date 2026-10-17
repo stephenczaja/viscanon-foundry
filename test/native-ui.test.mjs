@@ -9,7 +9,9 @@ const workspaceCore = readFileSync(new URL('../scripts/workspace-core.mjs', impo
 const workspaceActions = readFileSync(new URL('../scripts/workspace-actions.mjs', import.meta.url), 'utf8');
 const workspaceUi = readFileSync(new URL('../scripts/workspace-ui.mjs', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('../styles/bridge.css', import.meta.url), 'utf8');
-const origin = 'http://foundry-ui.invalid';
+// Loopback is a trustworthy browser origin, so native crypto.randomUUID works
+// when the full module (including its workspace controller) initializes.
+const origin = 'http://localhost:33819';
 const endpoint = 'https://xzievefbzeyvefazppvj.supabase.co/functions/v1/foundry-bridge';
 const code = 'c'.repeat(64);
 const eventIds = ['20000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000002'];
