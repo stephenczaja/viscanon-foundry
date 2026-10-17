@@ -79,7 +79,7 @@ function fixtureSetup() {
   globalThis.fixture = { callbacks, sockets, module, get Settings() { return menu.type; } };
 }
 
-test('native browser renders connected status and scoped artwork spacing without altering ordinary popouts', async () => {
+test('native browser renders artwork-only status and scoped artwork spacing without altering ordinary popouts', async () => {
   const browser = await chromium.launch({ headless: true, timeout: 3000 });
   try {
     const page = await browser.newPage({ serviceWorkers: 'block' });
@@ -129,18 +129,31 @@ test('native browser renders connected status and scoped artwork spacing without
     }, code);
     await page.waitForFunction(() => fixture.module.api.status.state === 'connected', null, { timeout: 2000 });
     await page.evaluate(async () => { fixture.settings = new fixture.Settings(); await fixture.settings.render(); });
-    const success = await page.locator('.viscanon-bridge-status').evaluate(element => {
+    const partial = await page.locator('.viscanon-bridge-status').evaluate(element => {
       const message = element.querySelector('.viscanon-bridge-status-message'), check = element.querySelector('.viscanon-bridge-status-check');
-      return { state: element.dataset.state, background: getComputedStyle(element).backgroundColor, hidden: check.hidden,
-        color: getComputedStyle(check).color, iconLeft: check.getBoundingClientRect().left, textRight: message.getBoundingClientRect().right,
+      return { state: element.dataset.state, capability: element.dataset.capability,
+        background: getComputedStyle(element).backgroundColor, hidden: check.hidden,
+        display: getComputedStyle(check).display, message: message.textContent };
+    });
+    assert.equal(partial.state, 'connected');
+    assert.equal(partial.capability, 'partial');
+    assert.equal(partial.background, 'rgba(127, 127, 127, 0.12)');
+    assert.equal(partial.hidden, true); assert.equal(partial.display, 'none');
+    assert.match(partial.message, /Send to Foundry is unavailable/);
+    const fullStyle = await page.locator('.viscanon-bridge-status').evaluate(element => {
+      // Check the full-pairing CSS state without pretending this legacy code has Send access.
+      element.dataset.capability = 'full';
+      const message = element.querySelector('.viscanon-bridge-status-message'), check = element.querySelector('.viscanon-bridge-status-check');
+      check.hidden = false;
+      return { background: getComputedStyle(element).backgroundColor, color: getComputedStyle(check).color,
+        iconLeft: check.getBoundingClientRect().left, textRight: message.getBoundingClientRect().right,
         rightInset: element.getBoundingClientRect().right - check.getBoundingClientRect().right, ariaHidden: check.getAttribute('aria-hidden') };
     });
-    assert.equal(success.state, 'connected');
-    assert.equal(success.background, 'rgba(74, 163, 94, 0.14)');
-    assert.equal(success.color, 'rgb(101, 183, 125)');
-    assert.equal(success.hidden, false); assert.equal(success.ariaHidden, 'true');
-    assert.ok(success.iconLeft >= success.textRight + 11, 'the green check is to the right of the status text');
-    assert.ok(Math.abs(success.rightInset - 10) < 1, 'the check aligns with the container right padding');
+    assert.equal(fullStyle.background, 'rgba(74, 163, 94, 0.14)');
+    assert.equal(fullStyle.color, 'rgb(101, 183, 125)');
+    assert.equal(fullStyle.ariaHidden, 'true');
+    assert.ok(fullStyle.iconLeft >= fullStyle.textRight + 11, 'the green check is to the right of the status text');
+    assert.ok(Math.abs(fullStyle.rightInset - 10) < 1, 'the check aligns with the container right padding');
     await page.evaluate(() => fixture.module.api.disconnect());
     const reset = await page.locator('.viscanon-bridge-status').evaluate(element => ({ state: element.dataset.state,
       background: getComputedStyle(element).backgroundColor, hidden: element.querySelector('.viscanon-bridge-status-check').hidden,
