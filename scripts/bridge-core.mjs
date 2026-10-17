@@ -2,6 +2,7 @@ export const MODULE_ID = 'viscanon-bridge';
 export const SOCKET_NAME = `module.${MODULE_ID}`;
 export const DEFAULT_ENDPOINT = 'https://xzievefbzeyvefazppvj.supabase.co/functions/v1/foundry-bridge';
 export const TOKEN_PATTERN = /^[a-f0-9]{64}$/;
+const PAIRING_PATTERN = /^vc2-([a-f0-9]{64})-([a-f0-9]{64})$/;
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const CURSOR_PATTERN = /^(?:0|[1-9][0-9]{0,38})$/;
 const MAX_EVENT_AGE_MS = 10 * 60 * 1000;
@@ -12,6 +13,18 @@ export function isCursor(value) {
 
 export function normalizeCode(value) {
   return String(value ?? '').trim().toLowerCase();
+}
+
+/** The copied setup code is only ever split in a GM browser. Its private half
+ * must never be written to a world setting or sent over a Foundry socket. */
+export function parsePairingCode(value) {
+  const code = normalizeCode(value);
+  if (TOKEN_PATTERN.test(code)) return { token: code, gmToken: null, legacy: true };
+  const match = PAIRING_PATTERN.exec(code);
+  if (!match || match[1] === match[2]) {
+    throw new Error('Paste the complete Viscanon connection code. New codes start with VC2-.');
+  }
+  return { token: match[1], gmToken: match[2], legacy: false };
 }
 
 export function safeArtworkUrl(value, endpoint = DEFAULT_ENDPOINT) {
@@ -49,7 +62,8 @@ export function validateDisplayEvent(event, { endpoint = DEFAULT_ENDPOINT, now =
   const imageUrl = safeArtworkUrl(event.item.image, endpoint);
   if (!imageUrl || typeof event.item.title !== 'string') return null;
   const title = event.item.title.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 240) || 'Viscanon artwork';
-  return { id: event.id, sequence: event.sequence, imageUrl, title, expiresAt };
+  return { id: event.id, sequence: event.sequence, campaignId: event.campaignId,
+    itemId: event.item.id, type: event.type, imageUrl, title, expiresAt };
 }
 
 export class BridgeHttpError extends Error {
