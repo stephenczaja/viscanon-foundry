@@ -44,15 +44,15 @@ Use Node.js 24 or newer and Python 3. No npm dependencies are required.
 node package.mjs /absolute/output/viscanon-bridge.zip
 ```
 
-The deterministic archive contains exactly six files under `viscanon-bridge/`: the manifest, this README, two runtime scripts, the stylesheet, and the logo. The packager uses an explicit allowlist, so Git metadata, GitHub workflows, build scripts, and release artifacts are excluded. Choose an output path outside the repository.
+The deterministic archive contains the manifest, this README, and every file under the module's runtime directories (`scripts`, `styles`, `assets`, `templates`, `lang`, and `fonts`). The directory allowlist excludes Git metadata, GitHub workflows, tests, build scripts, and release artifacts. Choose an output path outside the repository.
 
 ## Publish a new version
 
-The public repository is [stephenczaja/viscanon-foundry](https://github.com/stephenczaja/viscanon-foundry). Pushing this module-only source to `main` runs the release workflow. It builds the ZIP in the runner’s temporary directory, then creates the versioned release with `viscanon-bridge.zip` and `module.json` attached. It uses the workflow’s `GITHUB_TOKEN`; no external credentials or hosting account are needed. Existing releases and tags are never overwritten.
+The public repository is [stephenczaja/viscanon-foundry](https://github.com/stephenczaja/viscanon-foundry). Merge the packaging workflow changes into `main` before preparing a release branch: GitHub only accepts manual workflow dispatch when the workflow file exists on the default branch. A workflow-only merge leaves the stable manifest at its current version. Prepare the complete module source on a release branch. Increment `module.json`’s version, point `download` to that version's GitHub release ZIP, and keep `manifest` at `https://foundry.viscanon.com/module.json`. Update this README's version, release description, and compatibility copy.
 
-For later releases, increment `module.json`’s version and update its versioned `download` URL. Keep the `manifest` URL unchanged. Update this README’s version and release description, then push the changes to `main`. The workflow rejects a version that already has a release or tag. Its manual run option provides a retry when a release has not yet been created.
+After the branch checks pass, manually run **Release Foundry module** on that branch with **publish_versioned** enabled. The workflow builds a deterministic ZIP, creates a new versioned release with `viscanon-bridge.zip` and `module.json`, downloads both assets, and checks that their bytes match the branch source. It rejects an existing release or tag and never replaces release assets. Verify the public versioned download before promoting the stable manifest.
 
-If a run leaves a draft release or tag behind, resolve that separately or use a new version. The workflow will not modify an existing release.
+Only then merge the same source into `main`. A change to `module.json` triggers another build; the workflow downloads the previously published assets and requires exact byte matches. It does not publish them again. If the merge changes any packaged byte, stop and prepare a new version instead of pointing the stable manifest at different code. A push that does not change `module.json` only runs verification. If a run leaves a partial release or tag, resolve it separately or use a new version.
 
 ## First Foundry smoke test
 
