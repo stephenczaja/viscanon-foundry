@@ -5,6 +5,20 @@ export const PIN_ICON = `modules/${MODULE_ID}/assets/viscanon-eye.svg`;
 export const PIN_VISIBILITY = Object.freeze({
   onReveal: 'on_reveal', gmOnly: 'gm_only', visible: 'visible'
 });
+export const PIN_ICONS = Object.freeze({
+  [PIN_VISIBILITY.onReveal]: `modules/${MODULE_ID}/assets/viscanon-eye-reveal.svg`,
+  [PIN_VISIBILITY.gmOnly]: `modules/${MODULE_ID}/assets/viscanon-eye-private.svg`,
+  [PIN_VISIBILITY.visible]: PIN_ICON
+});
+const PIN_LABELS = Object.freeze({on_reveal:'Will appear on reveal',gm_only:'GM only',visible:'Visible to players'});
+
+export function entryDocumentName(entry) {
+  const clean = value => typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, '').trim() : '';
+  const name = clean(entry.entryName) || clean(entry.title);
+  if (!name) throw new Error('The entry name is unavailable. Send it again from Viscanon.');
+  const number = entry.type === 'scene' ? clean(entry.sceneNumber) : '';
+  return (number ? `${number}: ${name}` : name).slice(0, 240);
+}
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_CACHED_ARTWORK = 4;
@@ -268,6 +282,30 @@ export function createWorkspaceActions({
     if ((journal.folder?.id ?? journal.folder) !== folder.id) await journal.update({ folder: folder.id });
   }
 
+  async function ensureSceneFolder(command) {
+    assertGM();
+    const folders = () => world.folders?.contents ?? [];
+    // Reuse an existing Viscanon root without renaming, flagging or moving it.
+    const roots = folders().filter(folder => folder.type === 'Scene'
+      && folderParentId(folder) === null && folder.name === 'Viscanon');
+    let parent = roots.find(folder => folderFlag(folder, 'workspaceFolder') === 'root')
+      ?? roots[0] ?? await ensureFolder('Scene');
+    const keys = await folderKeysFor(command);
+    const child = async (name, role, key) => {
+      assertGM();
+      const existing = folders().find(folder => folder.type === 'Scene'
+        && folderParentId(folder) === parent.id && folder.name === name
+        && (!folderFlag(folder, 'folderKey') || folderFlag(folder, 'folderKey') === key));
+      return existing ?? globalThis.CONFIG.Folder.documentClass.create({name, type:'Scene',folder:parent.id,
+        flags:{[MODULE_ID]:{workspaceFolder:role,...(key ? {folderKey:key} : {})}}});
+    };
+    const chapter = String(command.entry.chapter || '').trim();
+    if (chapter) parent = await child(chapter, 'chapter', keys?.chapter);
+    const category = {location:'Locations',character:'Characters',scene:'Scenes'}[command.entry.type];
+    if (!category) throw new Error('Unsupported entry type.');
+    return child(category, 'category', keys?.category);
+  }
+
   function getPins(campaignId) {
     if (!campaignId) return [];
     const all = [];
@@ -317,9 +355,13 @@ export function createWorkspaceActions({
     };
     if (exposed) {
       // Replace the private GM title before any player permission is granted.
-      if (journal.name !== safeTitle) { assertGM(); await journal.update({ name: safeTitle }); }
-      for (const page of pages) {
-        if (page.name !== safeTitle) { assertGM(); await page.update({ name: safeTitle }); }
+      // New entry-named documents retain their creation name (including GM
+      // edits). Older pins keep their existing neutral-title behavior.
+      if (journal.flags?.[MODULE_ID]?.entryNamed !== true) {
+        if (journal.name !== safeTitle) { assertGM(); await journal.update({ name: safeTitle }); }
+        for (const page of pages) {
+          if (page.name !== safeTitle) { assertGM(); await page.update({ name: safeTitle }); }
+        }
       }
       for (const page of pages) {
         const change = ownershipChange(page);
@@ -507,12 +549,13 @@ export function createWorkspaceActions({
     if (!Number.isFinite(major) || major < 13 || major > 14) throw new Error('This Foundry version is not supported.');
     const saved = await saveArtwork(command, 'image', { disclosedToPlayers: true,
       checkCurrentAction: true });
-    await assertActionCurrent(command);
-    const folder = await ensureFolder('Scene');
-    const data = sceneCreateData({ ...command.entry, title: playerTitle() }, saved.path, saved.dimensions, major);
+    const current = await assertActionCurrent(command);
+    const folder = await ensureSceneFolder(current);
+    const data = sceneCreateData({ ...current.entry, title: entryDocumentName(current.entry) }, saved.path, saved.dimensions, major);
     data.folder = folder.id;
     data.ownership = { default: 0 };
-    await assertActionCurrent(command);
+    const verified = await assertActionCurrent(command);
+    data.name = entryDocumentName(verified.entry);
     const scene = await globalThis.CONFIG.Scene.documentClass.create(data);
     if (!scene) throw new Error('Foundry did not create the scene.');
     return scene;
@@ -524,7 +567,7 @@ export function createWorkspaceActions({
     const scene = world.scenes?.get(sceneId);
     if (board?.scene?.id !== sceneId) throw new Error('Open the map you want to place a pin on.');
     if (!scene) throw new Error('Choose an existing Foundry scene.');
-    const position = await captureMapPoint(scene);
+    const position = await captureMapPoint(scene, {icon:PIN_ICONS[visibility],label:PIN_LABELS[visibility]});
     if (!position) return null;
     await assertActionCurrent(command);
     // The popup's revealed snapshot may already be stale after an Undo. Only
@@ -535,9 +578,6 @@ export function createWorkspaceActions({
     // ownership. An unrevealed pin contains only this public module icon.
     const saved = exposed ? await saveArtwork(command, 'image', {
       disclosedToPlayers: true, checkCurrentAction: true }) : null;
-    // Hidden Foundry document metadata may replicate to players in some
-    // versions, so no private Viscanon title is stored here at all.
-    const name = playerTitle();
     await assertActionCurrent(command);
     const folder = await ensureFolder('JournalEntry', exposed ? folderKeys : null);
     const ownership = { default: exposed ? ownerLevel() : 0 };
@@ -548,7 +588,11 @@ export function createWorkspaceActions({
       : { visibility, publicArtworkPath: saved?.path ?? '',
         ...(visibility===PIN_VISIBILITY.gmOnly ? {campaignId:command.campaignId,entryId:command.entry.id,
           artworkFingerprint:command.entry.artworkFingerprint} : {}) };
-    await assertActionCurrent(command);
+    const current = await assertActionCurrent(command);
+    const name = entryDocumentName(current.entry);
+    // The requested document name lives only in Foundry's permission-controlled
+    // Journal/page name fields, never in the globally replicated Note or flags.
+    pinFlags.entryNamed = true;
     const journal = await globalThis.CONFIG.JournalEntry.documentClass.create({
       name, folder: folder.id, ownership,
       pages: [{ name, type: 'image', src: saved?.path ?? PIN_ICON, ownership }],
@@ -561,7 +605,7 @@ export function createWorkspaceActions({
       await assertActionCurrent(command);
       const notes = await scene.createEmbeddedDocuments('Note', [{
         entryId: journal.id, pageId, ...position, global: true, iconSize: 48,
-        texture: { src: PIN_ICON }, flags: { [MODULE_ID]: { mapPin: true } }
+        texture: { src: PIN_ICONS[visibility] }, flags: { [MODULE_ID]: { mapPin: true } }
       }]);
       if (!notes?.length) throw new Error('Foundry did not create the map pin.');
       return { journal, note: notes[0], folderStatus: exposed

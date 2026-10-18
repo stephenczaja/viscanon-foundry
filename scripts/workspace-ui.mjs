@@ -1,5 +1,5 @@
 import { MODULE_ID } from './bridge-core.mjs';
-import { PIN_VISIBILITY } from './workspace-actions.mjs';
+import { PIN_VISIBILITY, PIN_ICONS } from './workspace-actions.mjs';
 
 function make(tag, text = '', className = '') {
   const element = document.createElement(tag);
@@ -20,7 +20,7 @@ export function createWorkspaceApplication(command, actions, onClose = () => {},
   return class ViscanonWorkspace extends foundry.applications.api.ApplicationV2 {
     static DEFAULT_OPTIONS = {
       classes: ['viscanon-bridge-workspace'],
-      window: { title: 'Send to Foundry', resizable: true },
+      window: { title: 'Viscanon', resizable: true },
       position: { width: 1120, height: 630 }
     };
 
@@ -65,16 +65,14 @@ export function createWorkspaceApplication(command, actions, onClose = () => {},
         option(PIN_VISIBILITY.visible, 'Visible to players')
       );
       visibility.value = PIN_VISIBILITY.onReveal;
-      visibilityLabel.append(visibility);
+      const visibilityArtwork = make('img', '', 'viscanon-bridge-workspace-visibility-icon');
+      visibilityArtwork.src = PIN_ICONS[PIN_VISIBILITY.onReveal];
+      visibilityArtwork.alt = 'Will appear on reveal';
+      visibilityLabel.append(visibilityArtwork, visibility);
       const pinButton = make('button', 'Place map pin');
       pinButton.type = 'button'; pinButton.dataset.workspaceAction = 'pin';
       const pinButtons=make('div','','viscanon-bridge-workspace-pin-buttons');
       pinButtons.append(pinButton);
-      if (actions.legacyPins?.().length) {
-        const linkButton=make('button','Link existing pin');
-        linkButton.type='button'; linkButton.dataset.workspaceAction='link-pin';
-        pinButtons.append(linkButton);
-      }
       pin.append(visibilityLabel,pinButtons);
 
       const map = make('section', '', 'viscanon-bridge-workspace-section');
@@ -85,9 +83,6 @@ export function createWorkspaceApplication(command, actions, onClose = () => {},
 
       const actorSection = make('section', '', 'viscanon-bridge-workspace-section');
       actorSection.append(make('h3', 'Attach to actor'), make('p', 'Set an actor’s portrait or create a new actor.'));
-      const searchLabel = make('label', 'Search actors');
-      const search = make('input'); search.type = 'search'; search.dataset.workspaceField = 'actor-search';
-      search.autocomplete = 'off'; searchLabel.append(search);
       const actorLabel = make('label', 'Actor');
       const actor = make('select'); actor.dataset.workspaceField = 'actor';
       actorLabel.append(actor);
@@ -99,7 +94,7 @@ export function createWorkspaceApplication(command, actions, onClose = () => {},
       actorButton.type = 'button'; actorButton.dataset.workspaceAction = 'actor';
       const actorFields = make('div', '', 'viscanon-bridge-workspace-actor-fields');
       actorFields.append(actorLabel, actorTypeLabel);
-      actorSection.append(searchLabel, actorFields, actorButton);
+      actorSection.append(actorFields, actorButton);
       choices.append(reveal, pin, map, actorSection);
       body.append(artwork, choices);
       content.append(header, body, feedback);
@@ -132,21 +127,24 @@ export function createWorkspaceApplication(command, actions, onClose = () => {},
           ? `Artwork could not be loaded: ${failure.reason?.message || 'Transfer failed.'} Try an action while its link remains valid.`
           : 'Ready.';
       });
-      const search = root.querySelector('[data-workspace-field="actor-search"]');
+      const visibility = root.querySelector('[data-workspace-field="visibility"]');
+      const visibilityArtwork = root.querySelector('.viscanon-bridge-workspace-visibility-icon');
+      visibility.addEventListener('change', () => {
+        visibilityArtwork.src = PIN_ICONS[visibility.value];
+        visibilityArtwork.alt = visibility.selectedOptions[0].textContent;
+      });
       const actor = root.querySelector('[data-workspace-field="actor"]');
       const actorType = root.querySelector('[data-workspace-field="actor-type"]');
       const actorTypeLabel = actorType.closest('label');
       const refreshActors = () => {
         const selected = actor.value;
-        const query = search.value.trim().toLocaleLowerCase();
         actor.replaceChildren(option('', 'Create a new actor'));
         for (const item of game.actors?.contents ?? []) {
-          if (!query || item.name.toLocaleLowerCase().includes(query)) actor.append(option(item.id, item.name));
+          actor.append(option(item.id, item.name));
         }
         if ([...actor.options].some(item => item.value === selected)) actor.value = selected;
         actorTypeLabel.hidden = Boolean(actor.value);
       };
-      search.addEventListener('input', refreshActors);
       actor.addEventListener('change', () => { actorTypeLabel.hidden = Boolean(actor.value); });
       refreshActors();
       for (const button of root.querySelectorAll('[data-workspace-action]')) {
@@ -189,11 +187,6 @@ export function createWorkspaceApplication(command, actions, onClose = () => {},
                   if (!this._workspaceClosed) await this.maximize();
                 }
                 name = placed ? 'Map pin placed.' : 'Map pin placement cancelled.';
-                break;
-              }
-              case 'link-pin': {
-                const linked=await actions.linkExistingPin(current);
-                name=linked ? 'Existing pin linked. Position and visibility preserved.' : 'Pin linking cancelled.';
                 break;
               }
               case 'scene': {

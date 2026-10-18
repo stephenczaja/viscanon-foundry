@@ -17,7 +17,7 @@ export function createPinPlacement({ board, assertGM, icon, document: doc = glob
   hooks = globalThis.Hooks } = {}) {
   let cancel;
   function cancelPinPlacement() { cancel?.(); }
-  function captureMapPoint(scene) {
+  function captureMapPoint(scene, { icon: placementIcon = icon, label = '' } = {}) {
     assertGM();
     if (!scene || board?.scene?.id !== scene.id) throw new Error('Open a map in Foundry before placing a pin.');
     const view = board?.app?.view ?? board?.app?.renderer?.view;
@@ -26,9 +26,9 @@ export function createPinPlacement({ board, assertGM, icon, document: doc = glob
     return new Promise((resolve, reject) => {
       const preview = doc.createElement?.('img');
       if (preview) {
-        preview.src = icon;
+        preview.src = placementIcon;
         preview.className = 'viscanon-bridge-pin-preview';
-        preview.alt = '';
+        preview.alt = label;
         preview.hidden = true;
         doc.body?.append(preview);
       }

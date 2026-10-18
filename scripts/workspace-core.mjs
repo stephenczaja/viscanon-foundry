@@ -39,6 +39,8 @@ export function validateWorkspaceCommand(command, endpoint = DEFAULT_ENDPOINT, n
       artworkFingerprint: entry.artworkFingerprint,
       battlemapFingerprint: entry.battlemapFingerprint || null,
       title,
+      entryName: label(entry.entryName, 240) || title,
+      sceneNumber: type === 'scene' ? label(entry.sceneNumber, 80) : '',
       publicTitle: label(entry.publicTitle, 240),
       type,
       chapter: label(entry.chapter),
