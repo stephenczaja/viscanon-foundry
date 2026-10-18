@@ -2,7 +2,7 @@
   "id": "viscanon-bridge",
   "title": "Viscanon",
   "description": "Show Viscanon reveals and send artwork, map pins, scenes, and actor portraits to your Foundry world.",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "authors": [
     {
       "name": "Viscanon",
@@ -22,6 +22,7 @@
   "socket": true,
   "url": "https://github.com/stephenczaja/viscanon-foundry",
   "manifest": "https://foundry.viscanon.com/module.json",
-  "download": "https://github.com/stephenczaja/viscanon-foundry/releases/download/v0.2.3/viscanon-bridge.zip",
-  "readme": "README.md"
+  "download": "https://github.com/stephenczaja/viscanon-foundry/releases/download/v0.2.4/viscanon-bridge.zip",
+  "readme": "README.md",
+  "persistentStorage": true
 }

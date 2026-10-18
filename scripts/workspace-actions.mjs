@@ -1,3 +1,4 @@
+import { createPinPlacement, isWorkspaceNote } from './workspace-pin.mjs';
 import { DEFAULT_ENDPOINT, MODULE_ID, safeArtworkUrl } from './bridge-core.mjs';
 
 export const PIN_ICON = `modules/${MODULE_ID}/assets/viscanon-eye.svg`;
@@ -87,7 +88,10 @@ export function createWorkspaceActions({
   endpoint = DEFAULT_ENDPOINT,
   canvas: board = globalThis.canvas,
   verifyPinVisibility = async () => false,
-  checkAction = async () => { throw new Error('Foundry cannot verify this request.'); }
+  checkAction = async () => { throw new Error('Foundry cannot verify this request.'); },
+  revealViscanon = async () => { throw new Error('Update the Viscanon bridge backend before revealing artwork.'); },
+  shareReveal = async () => { throw new Error('The Foundry artwork receiver is unavailable.'); },
+  fetchPinArtwork = async () => { throw new Error('Connect the updated GM workspace to open private pin artwork.'); }
 } = {}) {
   // An open popup must not inherit a different GM's authority when accounts
   // switch in the same browser profile while a transfer is in flight.
@@ -95,9 +99,12 @@ export function createWorkspaceActions({
   const downloads = new Map();
   const uploads = new Map();
   let pinCursor = 0;
+  let destroyed = false;
+  const privatePopouts = new Set();
+  const { captureMapPoint, cancelPinPlacement } = createPinPlacement({ board, assertGM, icon: PIN_ICON });
 
   function assertGM() {
-    if (!boundUserId || world.user?.id !== boundUserId || !world.user?.isGM
+    if (destroyed || !boundUserId || world.user?.id !== boundUserId || !world.user?.isGM
       || world.users.activeGM?.id !== boundUserId) {
       throw new Error('Only the active GM can use Send to Foundry.');
     }
@@ -479,22 +486,18 @@ export function createWorkspaceActions({
 
   async function revealArtwork(command) {
     assertGM();
-    const folderKeys = await folderKeysFor(command);
-    const saved = await saveArtwork(command, 'image', { disclosedToPlayers: true,
-      checkCurrentAction: true });
-    const ImagePopout = foundryApi.applications.apps.ImagePopout;
-    const title = playerTitle();
-    const popout = new ImagePopout({ src: saved.path, showTitle: true,
-      classes: [...(ImagePopout.DEFAULT_OPTIONS?.classes ?? []), 'viscanon-bridge-artwork'],
-      window: { title } });
-    await popout.render({ force: true });
-    await assertActionCurrent(command);
-    await popout.shareImage({ image: saved.path, title, showTitle: true });
-    await assertActionCurrent(command);
-    await promotePins({ campaignId: command.campaignId, itemId: command.entry.id,
-      fingerprint: command.entry.artworkFingerprint, local: true, artworkPath: saved.path,
-      folderKeys, beforeGrant: () => assertActionCurrent(command) });
-    return saved;
+    const current = await assertActionCurrent(command);
+    const receipt = await revealViscanon(current);
+    assertGM();
+    if (receipt?.revealed !== true || receipt.campaignId !== command.campaignId
+      || receipt.entryId !== command.entry.id || !/^[a-f0-9-]{36}$/i.test(receipt.eventId ?? '')) {
+      throw new Error('Viscanon did not confirm the artwork reveal.');
+    }
+    // Deliver the same server event used by ordinary Viscanon reveals. Every
+    // receiver deduplicates it; no second native share or permanent local flag.
+    await shareReveal(receipt);
+    assertGM();
+    return receipt;
   }
 
   async function createScene(command, allowPublicArtwork = false) {
@@ -502,7 +505,7 @@ export function createWorkspaceActions({
     if (!allowPublicArtwork) throw new Error(PUBLIC_FILE_WARNING);
     const major = Number(world.release?.generation ?? String(world.version).split('.')[0]);
     if (!Number.isFinite(major) || major < 13 || major > 14) throw new Error('This Foundry version is not supported.');
-    const saved = await saveArtwork(command, 'battlemap', { disclosedToPlayers: true,
+    const saved = await saveArtwork(command, 'image', { disclosedToPlayers: true,
       checkCurrentAction: true });
     await assertActionCurrent(command);
     const folder = await ensureFolder('Scene');
@@ -515,51 +518,14 @@ export function createWorkspaceActions({
     return scene;
   }
 
-  async function captureMapPoint(scene) {
-    assertGM();
-    if (board?.scene?.id !== scene.id) await scene.view();
-    assertGM();
-    const view = board?.app?.view ?? board?.app?.renderer?.view;
-    if (!view?.addEventListener || !board.stage?.toLocal) throw new Error('Foundry map placement is unavailable.');
-    globalThis.ui.notifications.info('Click the map to place the Viscanon eye, or press Escape to cancel.');
-    return new Promise((resolve, reject) => {
-      const finish = () => {
-        view.removeEventListener('pointerdown', click, true);
-        document.removeEventListener('keydown', escape, true);
-      };
-      const escape = event => {
-        if (event.key !== 'Escape') return;
-        finish();
-        reject(new Error('Map pin placement cancelled.'));
-      };
-      const click = event => {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        finish();
-        try { assertGM(); }
-        catch (error) { reject(error); return; }
-        const rect = view.getBoundingClientRect();
-        const renderer = board.app.renderer;
-        const point = board.stage.toLocal({
-          x: (event.clientX - rect.left) * renderer.width / rect.width,
-          y: (event.clientY - rect.top) * renderer.height / rect.height
-        });
-        if (!Number.isFinite(point.x) || !Number.isFinite(point.y)
-          || point.x < 0 || point.y < 0 || point.x > scene.width || point.y > scene.height) {
-          reject(new Error('Choose a point inside the scene.'));
-        } else resolve({ x: Math.round(point.x), y: Math.round(point.y) });
-      };
-      view.addEventListener('pointerdown', click, true);
-      document.addEventListener('keydown', escape, true);
-    });
-  }
-
   async function placePin(command, sceneId, visibility) {
     assertGM();
     if (!Object.values(PIN_VISIBILITY).includes(visibility)) throw new Error('Choose a pin visibility.');
     const scene = world.scenes?.get(sceneId);
+    if (board?.scene?.id !== sceneId) throw new Error('Open the map you want to place a pin on.');
     if (!scene) throw new Error('Choose an existing Foundry scene.');
     const position = await captureMapPoint(scene);
+    if (!position) return null;
     await assertActionCurrent(command);
     // The popup's revealed snapshot may already be stale after an Undo. Only
     // the fresh fingerprint reconciliation may promote an on-reveal pin.
@@ -579,7 +545,9 @@ export function createWorkspaceActions({
       ? { visibility, campaignId: command.campaignId, entryId: command.entry.id,
         artworkFingerprint: command.entry.artworkFingerprint, localRevealed: false,
         publicArtworkPath: '' }
-      : { visibility, publicArtworkPath: saved?.path ?? '' };
+      : { visibility, publicArtworkPath: saved?.path ?? '',
+        ...(visibility===PIN_VISIBILITY.gmOnly ? {campaignId:command.campaignId,entryId:command.entry.id,
+          artworkFingerprint:command.entry.artworkFingerprint} : {}) };
     await assertActionCurrent(command);
     const journal = await globalThis.CONFIG.JournalEntry.documentClass.create({
       name, folder: folder.id, ownership,
@@ -593,7 +561,7 @@ export function createWorkspaceActions({
       await assertActionCurrent(command);
       const notes = await scene.createEmbeddedDocuments('Note', [{
         entryId: journal.id, pageId, ...position, global: true, iconSize: 48,
-        texture: { src: PIN_ICON }
+        texture: { src: PIN_ICON }, flags: { [MODULE_ID]: { mapPin: true } }
       }]);
       if (!notes?.length) throw new Error('Foundry did not create the map pin.');
       return { journal, note: notes[0], folderStatus: exposed
@@ -603,6 +571,112 @@ export function createWorkspaceActions({
       if (world.user?.id === boundUserId && world.user?.isGM) await journal.delete();
       throw error;
     }
+  }
+
+  function legacyPins() {
+    assertGM();
+    return (world.journal?.contents ?? []).filter(journal=>{
+      const flags=journal.flags?.[MODULE_ID];
+      return [PIN_VISIBILITY.gmOnly,PIN_VISIBILITY.onReveal].includes(flags?.visibility)
+        && (!flags.campaignId || !flags.entryId || !FINGERPRINT.test(flags.artworkFingerprint ?? ''))
+        && Number(journal.ownership?.default ?? 0)===0
+        && journal.pages?.contents?.some(page=>page.type==='image' && page.src===PIN_ICON);
+    });
+  }
+
+  async function linkExistingPin(command, journalId) {
+    assertGM();
+    const choices=legacyPins();
+    if (!choices.length) throw new Error('There are no older hidden pins that need an artwork link.');
+    if (journalId===undefined) {
+      const content=document.createElement('div');
+      const description=document.createElement('p');
+      description.textContent=`Link “${command.entry.title}” to an existing hidden pin. Its position and visibility stay the same.`;
+      const select=document.createElement('select'); select.name='journalId';
+      const empty=document.createElement('option'); empty.value=''; empty.textContent='Choose an existing pin'; select.append(empty);
+      for (const journal of choices) {
+        const locations=(world.scenes?.contents ?? []).flatMap(scene=>(scene.notes?.contents ?? [])
+          .filter(note=>note.entryId===journal.id).map(note=>`${scene.name} (${Math.round(note.x)}, ${Math.round(note.y)})`));
+        const option=document.createElement('option'); option.value=journal.id;
+        option.textContent=locations.length ? locations.join(' · ') : `${journal.name} · ${journal.id}`;
+        select.append(option);
+      }
+      content.append(description,select);
+      const answer=await foundryApi.applications.api.DialogV2.input({window:{title:'Link existing pin'},content,
+        rejectClose:false,ok:{label:'Link artwork'}});
+      if (!answer) return null;
+      journalId=answer.journalId;
+    }
+    const journal=legacyPins().find(item=>item.id===journalId);
+    if (!journal) throw new Error('Choose an existing hidden pin that needs an artwork link.');
+    const fresh=await assertActionCurrent(command);
+    assertGM();
+    if (!legacyPins().includes(journal)) throw new Error('This pin changed while linking its artwork. Try again.');
+    // Identity is non-secret. No image URL, credential, title, or artwork bytes
+    // enter flags, and relinking never grants player access or moves the Note.
+    const changes={
+      [`flags.${MODULE_ID}.campaignId`]:fresh.campaignId,
+      [`flags.${MODULE_ID}.entryId`]:fresh.entry.id,
+      [`flags.${MODULE_ID}.artworkFingerprint`]:fresh.entry.artworkFingerprint
+    };
+    if (journal.flags[MODULE_ID].visibility===PIN_VISIBILITY.onReveal) changes[`flags.${MODULE_ID}.localRevealed`]=false;
+    await journal.update(changes);
+    return journal;
+  }
+
+  function activatePin(note) {
+    if (!isWorkspaceNote(note) || !world.user?.isGM) return;
+    // Public artwork uses Foundry's normal permission-aware Journal viewer.
+    const journal = note.entry ?? world.journal?.get?.(note.document?.entryId);
+    const page = journal?.pages?.contents?.find(item => item.id === note.document?.pageId)
+      ?? journal?.pages?.contents?.[0];
+    if (page?.src && page.src !== PIN_ICON) return;
+    void (async () => {
+      assertGM();
+      const flags=journal?.flags?.[MODULE_ID];
+      const proof={campaignId:flags?.campaignId,entryId:flags?.entryId,fingerprint:flags?.artworkFingerprint};
+      if (!proof.campaignId || !proof.entryId || !FINGERPRINT.test(proof.fingerprint ?? '')) {
+        throw new Error('This older pin has no artwork link. Send its entry from Viscanon and choose “Link existing pin”.');
+      }
+      const verify=async()=>{
+        const current=await fetchPinArtwork(proof);
+        assertGM();
+        if (current?.entry?.id!==proof.entryId || current.campaignId!==proof.campaignId
+          || current.entry.artworkFingerprint!==proof.fingerprint) throw new Error('The pin artwork could not be verified.');
+        return current;
+      };
+      const fresh=await verify();
+      // Cache keys include the pinned revision; a new image cannot reuse old
+      // bytes. Only non-secret IDs/fingerprint survive reload in the Journal.
+      const {blob}=await prefetchArtwork({...fresh,id:`pin:${proof.entryId}:${proof.fingerprint}`});
+      await verify();
+      assertGM();
+      const src = URL.createObjectURL(blob);
+      const ImagePopout = foundryApi.applications.apps.ImagePopout;
+      const PrivateImage = class extends ImagePopout {
+        _onClose(options) { URL.revokeObjectURL(src); privatePopouts.delete(this); return super._onClose?.(options); }
+        // Private blobs are local-only and must never enter Foundry's socket.
+        async shareImage() { throw new Error('Use Reveal artwork to share this image.'); }
+      };
+      const popout = new PrivateImage({ src, showTitle: true,
+        classes: [...(ImagePopout.DEFAULT_OPTIONS?.classes ?? []), 'viscanon-bridge-artwork'],
+        window: { title: fresh.entry.title } });
+      privatePopouts.add(popout);
+      try { await popout.render({ force: true }); assertGM(); }
+      catch (error) { URL.revokeObjectURL(src); privatePopouts.delete(popout); await popout.close(); throw error; }
+    })().catch(error => globalThis.ui?.notifications?.error?.(error.message));
+    return false;
+  }
+
+  function destroy() {
+    destroyed = true;
+    cancelPinPlacement();
+    downloads.clear(); uploads.clear();
+    for (const app of privatePopouts) {
+      if (app.element) app.element.hidden = true;
+      void Promise.resolve(app.close()).catch(() => {});
+    }
+    privatePopouts.clear();
   }
 
   function actorTypes() {
@@ -624,13 +698,18 @@ export function createWorkspaceActions({
     if (actorId) {
       const actor = world.actors?.get(actorId);
       if (!actor) throw new Error('Choose an existing actor.');
-      if (actorVisibleToPlayers(actor) && !allowPlayerVisibility) {
-        throw new Error('This actor is visible to players. Choose “Visible to players now” to attach artwork.');
-      }
+      const checkActorVisibility = async () => {
+        const fresh = await assertActionCurrent(command);
+        if (actorVisibleToPlayers(actor) && !allowPlayerVisibility && fresh.entry.revealed !== true) {
+          throw new Error('This actor is visible to players. Reveal the artwork in Viscanon first, or choose a private actor.');
+        }
+        return true;
+      };
+      await checkActorVisibility();
       if (!allowPublicArtwork) throw new Error(PUBLIC_FILE_WARNING);
       const saved = await saveArtwork(command, 'image', { disclosedToPlayers: true,
-        checkCurrentAction: true });
-      await assertActionCurrent(command);
+        checkCurrentAction: true, beforeUpload: checkActorVisibility });
+      await checkActorVisibility();
       await actor.update({ img: saved.path });
       return actor;
     }
@@ -650,6 +729,6 @@ export function createWorkspaceActions({
   }
 
   return { assertFresh, prefetchArtwork, saveArtwork, releaseArtwork,
-    revealArtwork, createScene, placePin,
+    revealArtwork, createScene, placePin, cancelPinPlacement, legacyPins, linkExistingPin, activatePin, destroy,
     getPins, reconcilePins, promotePins, actorTypes, attachActor };
 }

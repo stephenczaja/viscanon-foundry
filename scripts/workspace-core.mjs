@@ -42,6 +42,7 @@ export function validateWorkspaceCommand(command, endpoint = DEFAULT_ENDPOINT, n
       publicTitle: label(entry.publicTitle, 240),
       type,
       chapter: label(entry.chapter),
+      breadcrumbs: Array.isArray(entry.breadcrumbs) ? entry.breadcrumbs.slice(0, 16).map(value => label(value, 240)).filter(Boolean) : [],
       chapterId: entry.chapterId || null,
       category,
       image,
@@ -242,6 +243,42 @@ export class WorkspaceController {
       throw new Error('This entry’s artwork or map changed. Send it to Foundry again.');
     }
     return fresh;
+  }
+
+  async fetchPinArtwork(proof) {
+    if (!UUID.test(proof?.campaignId ?? '') || !UUID.test(proof?.entryId ?? '')
+      || !FINGERPRINT.test(proof?.fingerprint ?? '') || proof.campaignId!==this.campaignId
+      || !this.initialized || !this.coordinator || !this.isCoordinator() || !this.isOnline()) {
+      throw new Error('Connect this campaign’s GM workspace before opening private pin artwork.');
+    }
+    const epoch=this.generation, session=this.session;
+    const data=await this.request({action:'workspace-pin-artwork',session,
+      campaignId:proof.campaignId,entryId:proof.entryId,fingerprint:proof.fingerprint});
+    if (epoch!==this.generation || session!==this.session || !this.initialized
+      || !this.coordinator || !this.isCoordinator() || !this.isOnline()) {
+      throw new Error('The GM connection changed while opening this pin. Try again after reconnecting.');
+    }
+    const fresh=validateWorkspaceCommand({id:proof.entryId,action:'open',campaignId:proof.campaignId,
+      expiresAt:new Date(Date.now()+90_000).toISOString(),entry:data?.entry},this.endpoint);
+    if (!fresh || fresh.entry.id!==proof.entryId || fresh.entry.artworkFingerprint!==proof.fingerprint) {
+      throw new Error('This pin’s artwork changed in Viscanon. Link it to the intended artwork again.');
+    }
+    return fresh;
+  }
+
+  async revealArtwork(command) {
+    const current = await this.checkAction(command);
+    const epoch = this.generation, session = this.session;
+    const receipt = await this.request({ action: 'workspace-reveal', session, id: current.id,
+      revealId: crypto.randomUUID(), campaignId: current.campaignId, entryId: current.entry.id,
+      entryType: current.entry.type, artworkFingerprint: current.entry.artworkFingerprint,
+      battlemapFingerprint: current.entry.battlemapFingerprint || null });
+    if (epoch !== this.generation || session !== this.session || !this.isCoordinator()
+      || receipt?.revealed !== true || !UUID.test(receipt.eventId ?? '')
+      || receipt.campaignId !== current.campaignId || receipt.entryId !== current.entry.id) {
+      throw new Error('The connection changed before the reveal was confirmed. Check Viscanon before retrying.');
+    }
+    return receipt;
   }
 
   async tick() {

@@ -7,6 +7,7 @@ const runtime = readFileSync(new URL('../scripts/viscanon-bridge.mjs', import.me
 const core = readFileSync(new URL('../scripts/bridge-core.mjs', import.meta.url), 'utf8');
 const workspaceCore = readFileSync(new URL('../scripts/workspace-core.mjs', import.meta.url), 'utf8');
 const workspaceActions = readFileSync(new URL('../scripts/workspace-actions.mjs', import.meta.url), 'utf8');
+const workspacePin = readFileSync(new URL('../scripts/workspace-pin.mjs', import.meta.url), 'utf8');
 const workspaceUi = readFileSync(new URL('../scripts/workspace-ui.mjs', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('../styles/bridge.css', import.meta.url), 'utf8');
 // Loopback is a trustworthy browser origin, so native crypto.randomUUID works
@@ -80,7 +81,7 @@ function fixtureSetup() {
 }
 
 test('native browser renders artwork-only status and scoped artwork spacing without altering ordinary popouts', async () => {
-  const browser = await chromium.launch({ headless: true, timeout: 3000 });
+  const browser = await chromium.launch({ headless: true, timeout: 3000, ...(process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {}) });
   try {
     const page = await browser.newPage({ serviceWorkers: 'block' });
     page.setDefaultTimeout(3000);
@@ -100,6 +101,7 @@ test('native browser renders artwork-only status and scoped artwork spacing with
       if (url === `${origin}/scripts/bridge-core.mjs`) return route.fulfill({ contentType: 'text/javascript', body: core });
       if (url === `${origin}/scripts/workspace-core.mjs`) return route.fulfill({ contentType: 'text/javascript', body: workspaceCore });
       if (url === `${origin}/scripts/workspace-actions.mjs`) return route.fulfill({ contentType: 'text/javascript', body: workspaceActions });
+      if (url === `${origin}/scripts/workspace-pin.mjs`) return route.fulfill({ contentType: 'text/javascript', body: workspacePin });
       if (url === `${origin}/scripts/workspace-ui.mjs`) return route.fulfill({ contentType: 'text/javascript', body: workspaceUi });
       if (url === `${origin}/modules/viscanon-bridge/assets/viscanon-mark-white.svg`) return route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="81"/>' });
       if ([asset('wide'), asset('portrait')].includes(url)) {
