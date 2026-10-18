@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { WorkspaceController } from '../scripts/workspace-core.mjs';
 import { createPinPlacement, styleWorkspaceNote } from '../scripts/workspace-pin.mjs';
-import { createWorkspaceActions, PIN_ICON } from '../scripts/workspace-actions.mjs';
+import { createWorkspaceActions, PIN_ICON, PIN_ICONS, PIN_VISIBILITY, entryDocumentName } from '../scripts/workspace-actions.mjs';
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function surface() {
@@ -98,7 +98,7 @@ function actionFixture() {
   fx.scene.createEmbeddedDocuments = async (_, data) => data;
   globalThis.CONFIG = {
     Scene: { documentClass: {create: async data => {createdScenes.push(data);return data;}}},
-    Folder: { documentClass: { create: async data => ({ id: 'folder', ...data }) } },
+    Folder: { documentClass: { create: async data => { const folder={id:'folder-'+world.folders.contents.length,...data};world.folders.contents.push(folder);return folder;} } },
     JournalEntry: { documentClass: { create: async data => {
       const journal = { ...data, id: 'journal', async update(patch) {
         journalUpdates.push(patch);
@@ -147,7 +147,9 @@ test('a hidden pin opens actual artwork privately for its GM; no private URL ent
     assert.match(fx.popouts[0].options.src, /^blob:/);
     assert.equal(fx.popouts[0].options.window.title, 'Secret village');
     assert.equal(fx.uploads.length, 0);
-    assert.ok(!JSON.stringify(placed.journal).includes('Secret village'));
+    assert.equal(placed.journal.name, 'Secret village');
+    assert.equal(placed.journal.ownership.default, 0);
+    assert.ok(!JSON.stringify({note:placed.note,flags:placed.journal.flags}).includes('Secret village'));
     assert.ok(!JSON.stringify(placed.journal).includes('token='));
     await assert.rejects(fx.popouts[0].shareImage(), /Use Reveal/);
     fx.world.user = { id: 'player', isGM: false };
@@ -191,6 +193,58 @@ test('Create scene uses displayed artwork dimensions and creates an inactive gri
     assert.equal(scene.levels[0].background.src,'persistent/art.png');
   } finally {fx.restore();}
 });
+
+for (const type of ['location','character','scene']) {
+  test(`new ${type} Scene uses current canonical naming and chapter/type folders without changing existing documents`, async () => {
+    const fx=actionFixture();
+    try {
+      const root={id:'existing-root',name:'Viscanon',type:'Scene',folder:null};
+      const unrelated={id:'unrelated',name:'Old user folder',type:'Scene',folder:null};
+      fx.world.folders.contents.push(root,unrelated);
+      Object.assign(fx.command.entry,{type,category:type,title:'Obsolete title',entryName:'Haunted House',sceneNumber:type==='scene'?'A1':'',chapter:'The Coast',chapterId:'10000000-0000-4000-8000-000000000008'});
+      const before=structuredClone([root,unrelated]);
+      const created=await fx.actions.createScene(fx.command,true);
+      assert.equal(created.name,type==='scene'?'A1: Haunted House':'Haunted House');
+      const category=fx.world.folders.contents.find(f=>f.id===created.folder);
+      assert.equal(category.name,{location:'Locations',character:'Characters',scene:'Scenes'}[type]);
+      const chapter=fx.world.folders.contents.find(f=>f.id===category.folder);
+      assert.equal(chapter.name,'The Coast');assert.equal(chapter.folder,root.id);
+      assert.deepEqual([root,unrelated],before);
+      await fx.actions.createScene(fx.command,true);
+      assert.equal(fx.world.folders.contents.length,4,'reuse the same chapter/type folders');
+      assert.equal(created.ownership.default,0);assert.equal(created.navigation,false);
+    } finally {fx.restore();}
+  });
+}
+
+test('missing chapter and scene number create no invented labels or prefix',async()=>{
+  const fx=actionFixture();
+  try {
+    Object.assign(fx.command.entry,{type:'scene',category:'scene',entryName:'Arrival',sceneNumber:'',chapter:''});
+    const created=await fx.actions.createScene(fx.command,true);
+    assert.equal(created.name,'Arrival');
+    assert.deepEqual(fx.world.folders.contents.map(f=>f.name),['Viscanon','Scenes']);
+    assert.equal(entryDocumentName({type:'location',entryName:'Harbor',sceneNumber:'99'}),'Harbor');
+  } finally {fx.restore();}
+});
+
+for(const visibility of Object.values(PIN_VISIBILITY)) {
+  test(`${visibility} pin uses distinct cursor/note artwork, a named Journal and unchanged access`,async()=>{
+    const fx=actionFixture();
+    try {
+      Object.assign(fx.command.entry,{type:'scene',category:'scene',entryName:'Arrival',sceneNumber:'2'});
+      const pending=fx.actions.placePin(fx.command,fx.scene.id,visibility);
+      assert.equal(fx.previews[0].src,PIN_ICONS[visibility]);assert.ok(fx.previews[0].alt);
+      fx.view.fire('pointerdown',{clientX:110,clientY:120});const placed=await pending;
+      assert.equal(placed.note.texture.src,PIN_ICONS[visibility]);
+      assert.equal(placed.journal.name,'2: Arrival');assert.equal(placed.journal.pages.contents[0].name,'2: Arrival');
+      assert.equal(placed.journal.ownership.default,visibility==='visible'?2:0);
+      assert.equal(placed.journal.pages.contents[0].ownership.default,visibility==='visible'?2:0);
+      assert.ok(!JSON.stringify({note:placed.note,flags:placed.journal.flags}).includes('Arrival'));
+      assert.equal(fx.uploads.length,visibility==='visible'?1:0);
+    } finally {fx.restore();}
+  });
+}
 
 test('receiver posts a fresh dual-capability reveal and rejects a response after session change', async () => {
   const controller = new WorkspaceController({getConfig:()=>({}),isCoordinator:()=>true,openCommand:async()=>{}});

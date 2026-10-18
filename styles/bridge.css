@@ -20,7 +20,7 @@
 .viscanon-bridge-workspace .window-content { padding: 0; background: #0d1422; min-height: 0; overflow: hidden; }
 .viscanon-bridge-workspace-content { container-type: inline-size; display: flex; flex-direction: column; flex: 1; height: 100%; min-height: 0; background: #0d1422; color: #eef7fc; font: 14px/1.4 var(--font-body, sans-serif); color-scheme: dark; }
 .viscanon-bridge-workspace-content * { box-sizing: border-box; }
-.viscanon-bridge-workspace-header { display: flex; align-items: center; gap: 18px; flex: 0 0 auto; padding: 18px 22px; background: #101e34; }
+.viscanon-bridge-workspace-header { display: flex; align-items: center; gap: 18px; flex: 0 0 auto; padding: 18px 22px; background: #101e34; border-bottom: 1px solid #284259; }
 .viscanon-bridge-workspace-header img { width: 70px; height: 44px; object-fit: contain; border: 0; box-shadow: none; }
 .viscanon-bridge-workspace-heading { min-width: 0; }
 .viscanon-bridge-workspace-heading h2 { margin: 0; border: 0; color: #fff; font-size: 30px; line-height: 1.15; overflow-wrap: anywhere; }
@@ -38,8 +38,7 @@
 .viscanon-bridge-workspace-section h3 { margin: 0; border: 0; color: #8fe1f0; font-size: 18px; }
 .viscanon-bridge-workspace-section p { margin: 0; color: #e2edf5; font-size: 13px; line-height: 1.4; }
 .viscanon-bridge-workspace-section label { display: block; margin: 0; color: #c5dfeb; font-size: 12px; }
-.viscanon-bridge-workspace-section select,
-.viscanon-bridge-workspace-section input[type="search"] { display: block; width: 100%; min-width: 0; height: 28px; margin-top: 3px; padding: 4px 8px; background: #0a1423; color: #f4f8fc; border: 1px solid #63849d; border-radius: 4px; font: inherit; font-size: 13px; }
+.viscanon-bridge-workspace-section select { display: block; width: 100%; min-width: 0; height: 28px; margin-top: 3px; padding: 4px 8px; background: #0a1423; color: #f4f8fc; border: 1px solid #63849d; border-radius: 4px; font: inherit; font-size: 13px; }
 .viscanon-bridge-workspace-section option { background: #0a1423; color: #f4f8fc; }
 .viscanon-bridge-workspace-section input::placeholder { color: #a9c1d4; }
 .viscanon-bridge-workspace-pin-buttons { display: flex; gap: 8px; margin-top: auto; }
@@ -66,3 +65,5 @@
 .application.viscanon-bridge-artwork .window-content { padding: 0 !important; margin: 0; gap: 0; }
 .application.viscanon-bridge-artwork .window-content figure { padding: 0; margin: 0; }
 .application.viscanon-bridge-artwork .window-content img { display: block; padding: 0; margin: 0; border: 0; object-fit: contain; }
+
+.viscanon-bridge-workspace-visibility-icon { float: right; width: 32px; height: 24px; object-fit: contain; border: 0; background: transparent; box-shadow: none; }
