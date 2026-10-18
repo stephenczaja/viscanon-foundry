@@ -14,7 +14,7 @@ const eventId = '20000000-0000-4000-8000-000000000001';
 const fixtureOrigin = 'http://foundry.invalid';
 
 test('native Chromium rejects the legacy receiver and pairs, polls and delivers with bound defaults', async () => {
-  const browser = await chromium.launch({ headless: true, timeout: 3000 });
+  const browser = await chromium.launch({ headless: true, timeout: 3000, ...(process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {}) });
   try {
     const context = await browser.newContext({ serviceWorkers: 'block' });
     const page = await context.newPage();

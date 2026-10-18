@@ -21,7 +21,7 @@ export function createWorkspaceApplication(command, actions, onClose = () => {},
     static DEFAULT_OPTIONS = {
       classes: ['viscanon-bridge-workspace'],
       window: { title: 'Send to Foundry', resizable: true },
-      position: { width: 520 }
+      position: { width: 1120, height: 630 }
     };
 
     async _renderHTML() {
@@ -31,31 +31,32 @@ export function createWorkspaceApplication(command, actions, onClose = () => {},
       const logo = make('img');
       logo.src = `modules/${MODULE_ID}/assets/viscanon-mark-white.svg`;
       logo.alt = 'Viscanon';
-      header.append(logo);
+      const heading = make('div', '', 'viscanon-bridge-workspace-heading');
+      heading.append(make('h2', entry.title));
+      // Only show real ancestry supplied by Viscanon; category is an internal
+      // discriminator, not a breadcrumb. Older servers provide the chapter.
+      const ancestors = entry.breadcrumbs?.length ? entry.breadcrumbs : [entry.chapter].filter(Boolean);
+      heading.append(make('p', ancestors.join(' › '), 'viscanon-bridge-workspace-meta'));
+      header.append(logo, heading);
       const body = make('div', '', 'viscanon-bridge-workspace-body');
-      body.append(make('h2', entry.title), make('p', `${entry.type || 'Entry'}${entry.chapter ? ` · ${entry.chapter}` : ''}${entry.category ? ` · ${entry.category}` : ''}`, 'viscanon-bridge-workspace-meta'));
+      const artwork = make('aside', '', 'viscanon-bridge-workspace-art');
       const preview = make('img', '', 'viscanon-bridge-workspace-preview');
       preview.src = entry.image;
       preview.alt = `GM preview of ${entry.title}`;
-      body.append(preview);
-      const feedback = make('p', 'Choose what to send to this Foundry world.', 'viscanon-bridge-workspace-feedback');
+      artwork.append(preview);
+      const feedback = make('p', 'Choose an action.', 'viscanon-bridge-workspace-feedback');
       feedback.setAttribute('role', 'status');
       feedback.setAttribute('aria-live', 'polite');
-      body.append(feedback);
+      const choices = make('div', '', 'viscanon-bridge-workspace-choices');
 
       const reveal = make('section', '', 'viscanon-bridge-workspace-section');
-      reveal.append(make('h3', 'Reveal artwork'), make('p', 'Show this artwork to everyone connected to Foundry. Anyone with the saved Foundry file URL may fetch it after this window closes. This does not change its Viscanon reveal state.'));
+      reveal.append(make('h3', 'Reveal artwork'), make('p', 'Show this artwork to everyone connected to Foundry and reveal in Viscanon.'));
       const revealButton = make('button', 'Reveal artwork to players');
       revealButton.type = 'button'; revealButton.dataset.workspaceAction = 'reveal';
       reveal.append(revealButton);
 
       const pin = make('section', '', 'viscanon-bridge-workspace-section');
-      pin.append(make('h3', 'Place map pin'), make('p', 'Choose a scene, then click the map to place the Viscanon eye. Will appear on reveal keeps artwork out of Foundry file storage until a matching Viscanon reveal is confirmed or you choose Reveal artwork here. Either action uploads it to publicly readable storage. Visible to players uploads now. Anyone with the saved Foundry file URL may fetch it later even if the pin is hidden.'));
-      const sceneLabel = make('label', 'Scene');
-      const scene = make('select'); scene.dataset.workspaceField = 'scene';
-      for (const item of game.scenes?.contents ?? []) scene.append(option(item.id, item.name));
-      if (game.scenes?.current?.id) scene.value = game.scenes.current.id;
-      sceneLabel.append(scene);
+      pin.append(make('h3', 'Place map pin'), make('p', 'Place the Viscanon eye on the map you are viewing. Click to place; Escape to cancel.'));
       const visibilityLabel = make('label', 'Pin visibility');
       const visibility = make('select'); visibility.dataset.workspaceField = 'visibility';
       visibility.append(
@@ -67,20 +68,23 @@ export function createWorkspaceApplication(command, actions, onClose = () => {},
       visibilityLabel.append(visibility);
       const pinButton = make('button', 'Place map pin');
       pinButton.type = 'button'; pinButton.dataset.workspaceAction = 'pin';
-      pinButton.disabled = !scene.options.length;
-      pin.append(sceneLabel, visibilityLabel, pinButton);
+      const pinButtons=make('div','','viscanon-bridge-workspace-pin-buttons');
+      pinButtons.append(pinButton);
+      if (actions.legacyPins?.().length) {
+        const linkButton=make('button','Link existing pin');
+        linkButton.type='button'; linkButton.dataset.workspaceAction='link-pin';
+        pinButtons.append(linkButton);
+      }
+      pin.append(visibilityLabel,pinButtons);
 
       const map = make('section', '', 'viscanon-bridge-workspace-section');
-      map.append(make('h3', 'Create scene'), make('p', 'Create a gridless scene with a black background. The artwork URL and exact image dimensions are filled from Viscanon.'));
-      const sceneFileLabel = make('label', '', 'viscanon-bridge-workspace-consent');
-      const sceneFile = make('input'); sceneFile.type = 'checkbox'; sceneFile.dataset.workspaceField = 'scene-file-public';
-      sceneFileLabel.append(sceneFile, make('span', 'I understand anyone with the Foundry file URL may fetch the saved artwork even while this scene is GM only.'));
+      map.append(make('h3', 'Create scene'), make('p', 'Create a gridless scene in Foundry featuring this artwork.'));
       const mapButton = make('button', 'Create scene');
       mapButton.type = 'button'; mapButton.dataset.workspaceAction = 'scene';
-      map.append(sceneFileLabel, mapButton);
+      map.append(mapButton);
 
       const actorSection = make('section', '', 'viscanon-bridge-workspace-section');
-      actorSection.append(make('h3', 'Attach to actor'), make('p', 'Search an actor to set its portrait, or create a new actor using a type supported by this game system.'));
+      actorSection.append(make('h3', 'Attach to actor'), make('p', 'Set an actor’s portrait or create a new actor.'));
       const searchLabel = make('label', 'Search actors');
       const search = make('input'); search.type = 'search'; search.dataset.workspaceField = 'actor-search';
       search.autocomplete = 'off'; searchLabel.append(search);
@@ -93,15 +97,12 @@ export function createWorkspaceApplication(command, actions, onClose = () => {},
       actorTypeLabel.append(actorType);
       const actorButton = make('button', 'Attach artwork');
       actorButton.type = 'button'; actorButton.dataset.workspaceAction = 'actor';
-      const allowLabel = make('label', '', 'viscanon-bridge-workspace-consent');
-      const allow = make('input'); allow.type = 'checkbox'; allow.dataset.workspaceField = 'actor-visible';
-      allowLabel.append(allow, make('span', 'Visible to players now if this actor is player-visible'));
-      const actorFileLabel = make('label', '', 'viscanon-bridge-workspace-consent');
-      const actorFile = make('input'); actorFile.type = 'checkbox'; actorFile.dataset.workspaceField = 'actor-file-public';
-      actorFileLabel.append(actorFile, make('span', 'I understand anyone with the Foundry file URL may fetch the saved portrait even while this actor is GM only.'));
-      actorSection.append(searchLabel, actorLabel, actorTypeLabel, allowLabel, actorFileLabel, actorButton);
-      body.append(reveal, pin, map, actorSection);
-      content.append(header, body);
+      const actorFields = make('div', '', 'viscanon-bridge-workspace-actor-fields');
+      actorFields.append(actorLabel, actorTypeLabel);
+      actorSection.append(searchLabel, actorFields, actorButton);
+      choices.append(reveal, pin, map, actorSection);
+      body.append(artwork, choices);
+      content.append(header, body, feedback);
       return content;
     }
 
@@ -119,7 +120,7 @@ export function createWorkspaceApplication(command, actions, onClose = () => {},
       }
       const root = this.element;
       const feedback = root.querySelector('.viscanon-bridge-workspace-feedback');
-      feedback.textContent = 'Loading artwork in this GM browser…';
+      feedback.textContent = 'Loading artwork…';
       const transfers = [actions.prefetchArtwork(command)];
       if (entry.battlemap && entry.battlemap !== entry.image) {
         transfers.push(actions.prefetchArtwork(command, 'battlemap'));
@@ -129,7 +130,7 @@ export function createWorkspaceApplication(command, actions, onClose = () => {},
         const failure = results.find(result => result.status === 'rejected');
         feedback.textContent = failure
           ? `Artwork could not be loaded: ${failure.reason?.message || 'Transfer failed.'} Try an action while its link remains valid.`
-          : 'Artwork loaded privately. Choose an action to save it in Foundry.';
+          : 'Ready.';
       });
       const search = root.querySelector('[data-workspace-field="actor-search"]');
       const actor = root.querySelector('[data-workspace-field="actor"]');
@@ -172,37 +173,43 @@ export function createWorkspaceApplication(command, actions, onClose = () => {},
             switch (button.dataset.workspaceAction) {
               case 'reveal':
                 await actions.revealArtwork(current);
-                name = 'Artwork shared with connected players.';
+                name = 'Artwork shared with connected players and revealed in Viscanon.';
                 break;
               case 'pin': {
+                this._placingPin = true;
                 await this.minimize();
                 let placed;
                 try {
+                  if (this._workspaceClosed) return;
                   placed = await actions.placePin(current,
-                    root.querySelector('[data-workspace-field="scene"]').value,
+                    globalThis.canvas?.scene?.id,
                     root.querySelector('[data-workspace-field="visibility"]').value);
-                } finally { await this.maximize(); }
-                name = placed.folderStatus === 'nested' ? 'Map pin placed in its neutral chapter and category folders.'
-                  : placed.folderStatus === 'private' ? 'Map pin placed in the Viscanon root. Private folder nesting awaits player-world verification.'
-                    : 'Map pin placed in the Viscanon root. Stable chapter/category identity was unavailable.';
+                } finally {
+                  this._placingPin = false;
+                  if (!this._workspaceClosed) await this.maximize();
+                }
+                name = placed ? 'Map pin placed.' : 'Map pin placement cancelled.';
+                break;
+              }
+              case 'link-pin': {
+                const linked=await actions.linkExistingPin(current);
+                name=linked ? 'Existing pin linked. Position and visibility preserved.' : 'Pin linking cancelled.';
                 break;
               }
               case 'scene': {
-                const created = await actions.createScene(current,
-                  root.querySelector('[data-workspace-field="scene-file-public"]').checked);
-                name = `Scene created in the Viscanon root: ${created.name}. Private folder nesting awaits player-world verification.`;
+                await actions.createScene(current, true);
+                name = 'Scene created.';
                 break;
               }
               case 'actor': {
                 const attached = await actions.attachActor(current, actor.value, actorType.value,
-                  root.querySelector('[data-workspace-field="actor-visible"]').checked,
-                  root.querySelector('[data-workspace-field="actor-file-public"]').checked);
-                name = actor.value ? `Artwork attached to ${attached.name}.`
-                  : `Actor created in the Viscanon root: ${attached.name}. Private folder nesting awaits player-world verification.`;
+                  false, true);
+                name = actor.value ? `Artwork attached to ${attached.name}.` : 'Actor created.';
                 break;
               }
               default: throw new Error('Unsupported Foundry action.');
             }
+            if (this._workspaceClosed) return;
             feedback.textContent = name;
             ui.notifications.info(name);
           } catch (error) {
@@ -210,9 +217,6 @@ export function createWorkspaceApplication(command, actions, onClose = () => {},
             feedback.textContent = message;
             ui.notifications.error(message);
           } finally {
-            root.querySelector('[data-workspace-field="scene-file-public"]').checked = false;
-            root.querySelector('[data-workspace-field="actor-file-public"]').checked = false;
-            root.querySelector('[data-workspace-field="actor-visible"]').checked = false;
             controls.forEach(control => { control.disabled = false; });
           }
         });
@@ -220,6 +224,8 @@ export function createWorkspaceApplication(command, actions, onClose = () => {},
     }
 
     _onClose(options) {
+      this._workspaceClosed = true;
+      if (this._placingPin) actions.cancelPinPlacement?.();
       onClose();
       actions.releaseArtwork(command);
       return super._onClose(options);

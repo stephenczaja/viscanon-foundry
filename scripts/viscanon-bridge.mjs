@@ -2,6 +2,7 @@ import { BridgeController, BridgeHttpError, MODULE_ID, SOCKET_NAME, TOKEN_PATTER
   normalizeCode, parsePairingCode } from './bridge-core.mjs';
 import { WorkspaceController } from './workspace-core.mjs';
 import { createWorkspaceActions } from './workspace-actions.mjs';
+import { styleWorkspaceNote } from './workspace-pin.mjs';
 import { createWorkspaceApplication } from './workspace-ui.mjs';
 
 let bridge;
@@ -14,6 +15,23 @@ let pairingBusy = false;
 const workspaceWindows = new Set();
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const newWorkspaceActions = () => createWorkspaceActions({
+  fetchPinArtwork: proof => {
+    if (!workspace) throw new Error('The GM workspace connection is not ready.');
+    return workspace.fetchPinArtwork(proof);
+  },
+  revealViscanon: command => {
+    if (!workspace) throw new Error('The GM workspace connection is not ready.');
+    return workspace.revealArtwork(command);
+  },
+  shareReveal: async receipt => {
+    if (!bridge || !game.user?.isGM || game.users.activeGM?.id !== game.user.id) {
+      throw new Error('Revealed in Viscanon. The Foundry receiver will display it when connected.');
+    }
+    const packet = { type: 'artwork', id: receipt.eventId };
+    game.socket.emit(SOCKET_NAME, packet);
+    void bridge.receive(packet).catch(() => ui.notifications.warn('Revealed in Viscanon. Foundry is retrying the artwork display.'));
+    bridge.wake(); workspace?.wake();
+  },
   verifyPinVisibility: proof => workspace?.verifyPinVisibility(proof) ?? false,
   checkAction: command => {
     if (!workspace) throw new Error('The GM workspace connection is not ready.');
@@ -22,6 +40,9 @@ const newWorkspaceActions = () => createWorkspaceActions({
 });
 
 function closeWorkspaceWindows() {
+  // Retire in-flight private work and bind subsequent actions to the current
+  // account. Settings changes also take this path, even without an account switch.
+  if (workspaceActions) { workspaceActions.destroy(); workspaceActions = newWorkspaceActions(); }
   for (const app of [...workspaceWindows]) {
     // Hide private command details immediately; ApplicationV2.close may await animation.
     if (app.element) app.element.hidden = true;
@@ -81,9 +102,6 @@ function refreshWorkspaceAccount() {
   workspaceAccount = account;
   closeWorkspaceWindows();
   closeSettingsWindow();
-  // Workspace actions capture the GM ID. A newly signed-in GM needs a fresh
-  // action controller; the old popup retains an unusable controller.
-  if (workspaceActions) workspaceActions = newWorkspaceActions();
   workspace?.configure({ force: true });
   void clearForeignWorkspaceCode().catch(() => {
     ui.notifications.error('An old GM workspace code could not be removed from this browser. Clear this site’s local settings before another user signs in.');
@@ -604,6 +622,9 @@ Hooks.once('ready', () => {
   });
   game.socket.on('disconnect', () => workspace.wake());
   game.socket.on('connect', () => workspace.wake());
+  Hooks.on('drawNote', styleWorkspaceNote);
+  Hooks.on('refreshNote', styleWorkspaceNote);
+  Hooks.on('activateNote', note => workspaceActions?.activatePin(note));
   Hooks.on('userConnected', () => { refreshWorkspaceAccount(); bridge.configure(); workspace.configure(); });
   Hooks.on('updateUser', () => { refreshWorkspaceAccount(); bridge.configure(); workspace.configure(); });
   globalThis.addEventListener('online', () => { refreshWorkspaceAccount(); bridge.wake(); workspace.wake(); });
