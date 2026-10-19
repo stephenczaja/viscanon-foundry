@@ -66,4 +66,5 @@
 .application.viscanon-bridge-artwork .window-content figure { padding: 0; margin: 0; }
 .application.viscanon-bridge-artwork .window-content img { display: block; padding: 0; margin: 0; border: 0; object-fit: contain; }
 
-.viscanon-bridge-workspace-visibility-icon { float: right; width: 32px; height: 24px; object-fit: contain; border: 0; background: transparent; box-shadow: none; }
+.viscanon-bridge-workspace-visibility-icon { float: right; width: 56px; height: 42px; object-fit: contain; border: 0; background: transparent; box-shadow: none; }
+.viscanon-bridge-workspace-visibility select { clear: both; }

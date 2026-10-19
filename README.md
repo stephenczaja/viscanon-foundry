@@ -1,6 +1,6 @@
 # Viscanon Foundry module development source
 
-Viscanon 0.2.5 updates the Send to Foundry popup for Foundry 14. It keeps persistent-storage support and private pin recovery, simplifies the popup, names new pins and Scenes from the current entry, prefixes scene numbers when available, groups new Scenes by chapter and content type, and distinguishes the three pin modes with separate eye icons. This version requires the matching Foundry bridge backend. Automated local tests pass; real Foundry 14 GM and player acceptance remains user testing. No database migration or new grants are included.
+Viscanon 0.2.6 keeps acknowledged Send to Foundry popups usable across recoverable online polling and pin-update errors, so later Scene and Actor actions can still revalidate their original receipt. Offline, account, credential, and active-GM changes retain their existing invalidation rules. On-reveal canvas pins switch between the clock-eye and open eye as Viscanon reveals or hides the artwork; explicit GM-only and visible modes keep their overrides. The pin visibility preview is larger. Persistent storage, private pin recovery, entry names, chapter folders, ownership checks, and per-request delivery nonces remain protected. This module uses the existing 0.2.5 backend; no backend deployment, database migration, or new grants are included. Real Foundry 14 GM and player acceptance remains user testing.
 
 ## Install and connect
 
