@@ -205,6 +205,8 @@ for (const type of ['location','character','scene']) {
       const before=structuredClone([root,unrelated]);
       const created=await fx.actions.createScene(fx.command,true);
       assert.equal(created.name,type==='scene'?'A1: Haunted House':'Haunted House');
+      assert.equal(created.navName,'Haunted House');
+      assert.equal(Boolean(created.flags['viscanon-bridge'].numberedName),type==='scene');
       const category=fx.world.folders.contents.find(f=>f.id===created.folder);
       assert.equal(category.name,{location:'Locations',character:'Characters',scene:'Scenes'}[type]);
       const chapter=fx.world.folders.contents.find(f=>f.id===category.folder);
@@ -226,6 +228,33 @@ test('missing chapter and scene number create no invented labels or prefix',asyn
     assert.deepEqual(fx.world.folders.contents.map(f=>f.name),['Viscanon','Scenes']);
     assert.equal(entryDocumentName({type:'location',entryName:'Harbor',sceneNumber:'99'}),'Harbor');
   } finally {fx.restore();}
+});
+
+test('viewScene uses only the local document view and fences authority changes',async()=>{
+ const fx=actionFixture();let views=0;
+ const otherUsers=[{id:'player',viewedScene:'old'},{id:'other-gm',viewedScene:'old'}];
+ const scene={async view(){views++;},activate(){throw Error('must not activate');},pullUsers(){throw Error('must not pull');}};
+ try {
+  await fx.actions.viewScene(scene);assert.equal(views,1);
+  assert.deepEqual(otherUsers.map(u=>u.viewedScene),['old','old']);
+  fx.world.user={id:'different-gm',isGM:true};
+  await assert.rejects(fx.actions.viewScene(scene),/Only the active GM/);assert.equal(views,1);
+  fx.world.user={id:'gm',isGM:false};await assert.rejects(fx.actions.viewScene(scene),/Only the active GM/);
+ }finally{fx.restore();}
+});
+
+test('new actors use the fresh entry name without a scene prefix; existing actors keep their names',async()=>{
+ const fx=actionFixture(),created=[];
+ try {
+  fx.world.documentTypes={Actor:['npc']};
+  globalThis.CONFIG.Actor={documentClass:{async create(data){created.push(data);return data;}}};
+  Object.assign(fx.command.entry,{type:'scene',sceneNumber:'19',title:'Artwork revision name',entryName:'Canonical entry'});
+  fx.onCheck(()=>{fx.command.entry.entryName='Fresh entry name';});
+  await fx.actions.attachActor(fx.command,'','npc',false,true);
+  assert.equal(created[0].name,'Fresh entry name');assert.equal(created[0].ownership.default,0);
+  fx.reveal(true);await fx.actions.attachActor(fx.command,'actor','',false,true);
+  assert.deepEqual(fx.actorUpdates,[{img:'persistent/art.png'}]);
+ }finally{fx.restore();}
 });
 
 for(const visibility of Object.values(PIN_VISIBILITY)) {

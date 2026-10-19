@@ -74,6 +74,7 @@ async function popup(initial, checkAction, isAuthorized = () => true) {
     revealArtwork: async value => { mutations.push(value); },
     placePin: async value => { mutations.push(['pin', value]); return { folderStatus: 'root' }; },
     createScene: async value => { mutations.push(['scene', value]); return { name: 'Created' }; },
+    viewScene: async value => { mutations.push(['view',value]); },
     attachActor: async (value, ...args) => { mutations.push(['actor', value, ...args]); return { name: 'Created' }; }
   };
   const Popup = createWorkspaceApplication(initial, actions, () => {}, isAuthorized,
@@ -83,7 +84,7 @@ async function popup(initial, checkAction, isAuthorized = () => true) {
   app._onRender({}, {});
   await Promise.resolve();
   return {
-    app, checks, messages, mutations,
+    app, actions, checks, messages, mutations,
     restore() {
       for (const [key, value] of Object.entries(original)) {
         if (value === undefined) delete globalThis[key];
@@ -104,6 +105,48 @@ test('an expired delivery popup can act only after fresh command validation', as
     assert.match(fx.app.element.querySelector('.viscanon-bridge-workspace-feedback').textContent,
       /Artwork shared/);
   } finally { fx.restore(); }
+});
+
+test('Create scene opens the created scene locally and repeat clicks reuse it',async()=>{
+ const fresh=command(),fx=await popup(fresh,async()=>fresh);
+ try {
+  const button=fx.app.element.querySelector('[data-workspace-action="scene"]');
+  await button.click();await button.click();
+  assert.equal(fx.mutations.filter(x=>x[0]==='scene').length,1);
+  const views=fx.mutations.filter(x=>x[0]==='view');assert.equal(views.length,2);
+  assert.equal(views[0][1],views[1][1]);assert.equal(button.textContent,'View created scene');
+  assert.match(fx.messages[0][1],/opened in your view/);
+ }finally{fx.restore();}
+});
+
+test('view failure retains the created scene and reports partial success without creating another',async()=>{
+ const fresh=command(),fx=await popup(fresh,async()=>fresh);
+ try {
+  fx.actions.viewScene=async()=>{throw Error('Canvas unavailable.');};
+  const button=fx.app.element.querySelector('[data-workspace-action="scene"]');
+  await button.click();assert.match(fx.messages.at(-1)[1],/Scene created, but its view could not be opened/);
+  await button.click();assert.equal(fx.mutations.filter(x=>x[0]==='scene').length,1);
+ }finally{fx.restore();}
+});
+
+test('overlapping clicks cannot start multiple scene creations',async()=>{
+ const fresh=command();let release;const waiting=new Promise(resolve=>{release=resolve;});
+ const fx=await popup(fresh,async()=>{await waiting;return fresh;});
+ try {
+  const button=fx.app.element.querySelector('[data-workspace-action="scene"]');
+  const first=button.click();await button.click();release();await first;
+  assert.equal(fx.checks.length,1);assert.equal(fx.mutations.filter(x=>x[0]==='scene').length,1);
+ }finally{fx.restore();}
+});
+
+test('Pin visibility label directly contains the dropdown while its preview is a sibling',async()=>{
+ const fresh=command(),fx=await popup(fresh,async()=>fresh);
+ try {
+  const root=fx.app.element,select=root.querySelector('[data-workspace-field="visibility"]');
+  const label=select.closest('label');assert.equal(label.text,'Pin visibility');
+  assert.deepEqual(label.children,[select]);
+  assert.equal(label.parent.children[0],root.querySelector('.viscanon-bridge-workspace-visibility-icon'));
+ }finally{fx.restore();}
 });
 
 test('simplified popup keeps actor selection and attachment and exposes three distinct labeled pin icons',async()=>{

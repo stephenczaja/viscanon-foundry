@@ -57,7 +57,8 @@ export function createWorkspaceApplication(command, actions, onClose = () => {},
 
       const pin = make('section', '', 'viscanon-bridge-workspace-section');
       pin.append(make('h3', 'Place map pin'), make('p', 'Place the Viscanon eye on the map you are viewing. Click to place; Escape to cancel.'));
-      const visibilityLabel = make('label', 'Pin visibility', 'viscanon-bridge-workspace-visibility');
+      const visibilityField = make('div', '', 'viscanon-bridge-workspace-visibility');
+      const visibilityLabel = make('label', 'Pin visibility');
       const visibility = make('select'); visibility.dataset.workspaceField = 'visibility';
       visibility.append(
         option(PIN_VISIBILITY.onReveal, 'Will appear on reveal'),
@@ -68,12 +69,13 @@ export function createWorkspaceApplication(command, actions, onClose = () => {},
       const visibilityArtwork = make('img', '', 'viscanon-bridge-workspace-visibility-icon');
       visibilityArtwork.src = PIN_ICONS[PIN_VISIBILITY.onReveal];
       visibilityArtwork.alt = 'Will appear on reveal';
-      visibilityLabel.append(visibilityArtwork, visibility);
+      visibilityLabel.append(visibility);
+      visibilityField.append(visibilityArtwork, visibilityLabel);
       const pinButton = make('button', 'Place map pin');
       pinButton.type = 'button'; pinButton.dataset.workspaceAction = 'pin';
       const pinButtons=make('div','','viscanon-bridge-workspace-pin-buttons');
       pinButtons.append(pinButton);
-      pin.append(visibilityLabel,pinButtons);
+      pin.append(visibilityField,pinButtons);
 
       const map = make('section', '', 'viscanon-bridge-workspace-section');
       map.append(make('h3', 'Create scene'), make('p', 'Create a gridless scene in Foundry featuring this artwork.'));
@@ -149,6 +151,8 @@ export function createWorkspaceApplication(command, actions, onClose = () => {},
       refreshActors();
       for (const button of root.querySelectorAll('[data-workspace-action]')) {
         button.addEventListener('click', async () => {
+          if (this._actionPending) return;
+          this._actionPending = true;
           this._selectionStarted = true;
           const controls = root.querySelectorAll('[data-workspace-action]');
           controls.forEach(control => { control.disabled = true; });
@@ -190,8 +194,13 @@ export function createWorkspaceApplication(command, actions, onClose = () => {},
                 break;
               }
               case 'scene': {
-                await actions.createScene(current, true);
-                name = 'Scene created.';
+                this._createdScene ??= await actions.createScene(current, true);
+                button.textContent = 'View created scene';
+                try { await actions.viewScene(this._createdScene); }
+                catch (error) {
+                  throw new Error(`Scene created, but its view could not be opened. Open it from Scenes or try “View created scene”. ${error?.message || ''}`);
+                }
+                name = 'Scene created and opened in your view.';
                 break;
               }
               case 'actor': {
@@ -210,6 +219,7 @@ export function createWorkspaceApplication(command, actions, onClose = () => {},
             feedback.textContent = message;
             ui.notifications.error(message);
           } finally {
+            this._actionPending = false;
             controls.forEach(control => { control.disabled = false; });
           }
         });
