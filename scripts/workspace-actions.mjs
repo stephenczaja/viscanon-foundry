@@ -1,5 +1,6 @@
 import { createPinPlacement, isWorkspaceNote } from './workspace-pin.mjs';
 import { DEFAULT_ENDPOINT, MODULE_ID, safeArtworkUrl } from './bridge-core.mjs';
+import { numberedNameFlag } from './workspace-names.mjs';
 
 export const PIN_ICON = `modules/${MODULE_ID}/assets/viscanon-eye.svg`;
 export const PIN_VISIBILITY = Object.freeze({
@@ -12,10 +13,16 @@ export const PIN_ICONS = Object.freeze({
 });
 const PIN_LABELS = Object.freeze({on_reveal:'Will appear on reveal',gm_only:'GM only',visible:'Visible to players'});
 
-export function entryDocumentName(entry) {
+export function entryName(entry) {
   const clean = value => typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, '').trim() : '';
   const name = clean(entry.entryName) || clean(entry.title);
   if (!name) throw new Error('The entry name is unavailable. Send it again from Viscanon.');
+  return name.slice(0, 240);
+}
+
+export function entryDocumentName(entry) {
+  const clean = value => typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, '').trim() : '';
+  const name = entryName(entry);
   const number = entry.type === 'scene' ? clean(entry.sceneNumber) : '';
   return (number ? `${number}: ${name}` : name).slice(0, 240);
 }
@@ -54,10 +61,6 @@ export function sceneCreateData(entry, imagePath, dimensions, major) {
   }
   return data;
 }
-
-// Command-time titles can become stale before a GM acts. Only a freshly
-// projected public reveal event may replace this neutral player label.
-function playerTitle() { return PLAYER_LABEL; }
 
 function ownerLevel() {
   return globalThis.CONST?.DOCUMENT_OWNERSHIP_LEVELS?.OBSERVER ?? 2;
@@ -569,9 +572,18 @@ export function createWorkspaceActions({
     data.ownership = { default: 0 };
     const verified = await assertActionCurrent(command);
     data.name = entryDocumentName(verified.entry);
+    data.navName = entryName(verified.entry);
+    data.flags = { [MODULE_ID]: numberedNameFlag(verified.entry) };
     const scene = await globalThis.CONFIG.Scene.documentClass.create(data);
     if (!scene) throw new Error('Foundry did not create the scene.');
     return scene;
+  }
+
+  async function viewScene(scene) {
+    assertGM();
+    // Scene.view is client-local. Never activate the scene or pull other users.
+    await scene.view();
+    assertGM();
   }
 
   async function placePin(command, sceneId, visibility) {
@@ -606,6 +618,7 @@ export function createWorkspaceActions({
     // The requested document name lives only in Foundry's permission-controlled
     // Journal/page name fields, never in the globally replicated Note or flags.
     pinFlags.entryNamed = true;
+    Object.assign(pinFlags, numberedNameFlag(current.entry));
     const journal = await globalThis.CONFIG.JournalEntry.documentClass.create({
       name, folder: folder.id, ownership,
       pages: [{ name, type: 'image', src: saved?.path ?? PIN_ICON, ownership }],
@@ -776,9 +789,9 @@ export function createWorkspaceActions({
       checkCurrentAction: true });
     await assertActionCurrent(command);
     const folder = await ensureFolder('Actor');
-    await assertActionCurrent(command);
+    const current = await assertActionCurrent(command);
     const actor = await globalThis.CONFIG.Actor.documentClass.create({
-      name: playerTitle(), type: newType, img: saved.path, folder: folder.id,
+      name: entryName(current.entry), type: newType, img: saved.path, folder: folder.id,
       ownership: { default: 0 }
     });
     if (!actor) throw new Error('Foundry did not create the actor.');
@@ -786,6 +799,6 @@ export function createWorkspaceActions({
   }
 
   return { assertFresh, prefetchArtwork, saveArtwork, releaseArtwork,
-    revealArtwork, createScene, placePin, cancelPinPlacement, legacyPins, linkExistingPin, activatePin, destroy,
+    revealArtwork, createScene, viewScene, placePin, cancelPinPlacement, legacyPins, linkExistingPin, activatePin, destroy,
     getPins, reconcilePins, promotePins, actorTypes, attachActor };
 }

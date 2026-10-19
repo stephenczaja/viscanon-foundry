@@ -4,6 +4,7 @@ import { WorkspaceController } from './workspace-core.mjs';
 import { createWorkspaceActions } from './workspace-actions.mjs';
 import { styleWorkspaceNote } from './workspace-pin.mjs';
 import { createWorkspaceApplication } from './workspace-ui.mjs';
+import { installPlayerDocumentNames } from './workspace-names.mjs';
 
 let bridge;
 let workspace;
@@ -526,6 +527,7 @@ function createSettingsApplication() {
 }
 
 Hooks.once('init', () => {
+  installPlayerDocumentNames();
   game.settings.register(MODULE_ID, 'connectionCode', {
     name: 'Viscanon connection code', hint: 'A read-only code for receiving campaign artwork.',
     scope: 'world', config: false, type: String, default: '',
