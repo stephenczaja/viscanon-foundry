@@ -378,6 +378,19 @@ export function createWorkspaceActions({
         if (change) { assertGM(); await page.update(change); }
       }
     }
+    // Only this module's on-reveal Notes follow current reveal state. Explicit
+    // GM-only and visible modes keep their own icon and ownership policy.
+    if (journal.flags?.[MODULE_ID]?.visibility === PIN_VISIBILITY.onReveal) {
+      const icon = PIN_ICONS[exposed ? PIN_VISIBILITY.visible : PIN_VISIBILITY.onReveal];
+      for (const scene of world.scenes?.contents ?? []) {
+        for (const note of scene.notes?.contents ?? []) {
+          if (note.entryId !== journal.id || note.flags?.[MODULE_ID]?.mapPin !== true
+            || note.texture?.src === icon) continue;
+          assertGM();
+          await note.update({ 'texture.src': icon });
+        }
+      }
+    }
   }
 
   function publishedPinArtwork(journal) {

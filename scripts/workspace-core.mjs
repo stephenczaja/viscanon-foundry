@@ -400,7 +400,10 @@ export class WorkspaceController {
         this.setStatus('listening', 'Another GM browser is receiving requests. Check connection to take over.');
         delay = null;
       } else {
-        this.rotateSession();
+        // A recoverable online retry must not invalidate already acknowledged
+        // popups. Each poll's fresh receive nonce fences unfinished delivery;
+        // offline, account, credential and coordinator changes still rotate
+        // the receiver session through their explicit paths.
         this.setStatus('retrying', 'GM workspace connection interrupted. Retrying…');
       }
     } finally {

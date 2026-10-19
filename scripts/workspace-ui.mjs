@@ -57,7 +57,7 @@ export function createWorkspaceApplication(command, actions, onClose = () => {},
 
       const pin = make('section', '', 'viscanon-bridge-workspace-section');
       pin.append(make('h3', 'Place map pin'), make('p', 'Place the Viscanon eye on the map you are viewing. Click to place; Escape to cancel.'));
-      const visibilityLabel = make('label', 'Pin visibility');
+      const visibilityLabel = make('label', 'Pin visibility', 'viscanon-bridge-workspace-visibility');
       const visibility = make('select'); visibility.dataset.workspaceField = 'visibility';
       visibility.append(
         option(PIN_VISIBILITY.onReveal, 'Will appear on reveal'),
