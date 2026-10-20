@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { WorkspaceController } from '../scripts/workspace-core.mjs';
 import { createPinPlacement, styleWorkspaceNote } from '../scripts/workspace-pin.mjs';
 import { createWorkspaceActions, PIN_ICON, PIN_ICONS, PIN_VISIBILITY, entryDocumentName } from '../scripts/workspace-actions.mjs';
+import { sceneFolderPlan } from '../scripts/workspace-scene-folders.mjs';
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function surface() {
@@ -414,5 +415,141 @@ test('legacy pin native selection can cancel or link without replacing the Note'
   fx.actions.destroy();fx.command.expiresAt=0;fx.onCheck(()=>{throw Error('Expired Send');});
   const actions=fx.makeActions();actions.activatePin({entry:placed.journal,document:placed.note});await tick();await tick();
   assert.equal(fx.popouts.length,1);assert.equal(fx.journals.length,1);assert.equal(fx.uploads.length,0);
+ }finally{fx.restore();}
+});
+
+const locationId=n=>`20000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
+function organize(fx,type,names){
+ Object.assign(fx.command,{campaignId:locationId(1)});
+ Object.assign(fx.command.entry,{id:locationId(10+names.length-1),type,category:type,chapterId:locationId(2),chapter:'Chapter 1',
+  sceneOrganization:{version:1,status:'resolved',reason:'',locations:names.map((name,index)=>({id:locationId(10+index),name}))}});
+}
+function folderPath(fx,id){const path=[];while(id){const row=fx.world.folders.contents.find(f=>f.id===id);assert.ok(row);path.unshift(row.name);id=row.folder;}return path;}
+test('new artwork Scenes share canonical flat location folders across location, scene and character actions',async()=>{
+ const fx=actionFixture();try{
+  organize(fx,'location',['Saltmarsh Environs']);
+  const own=await fx.actions.createScene(fx.command,true);
+  assert.deepEqual(folderPath(fx,own.folder),['Viscanon','Chapter 1','Saltmarsh Environs']);
+  fx.command.entry.type='scene';fx.command.entry.category='scene';
+  const scene=await fx.actions.createScene(fx.command,true);
+  assert.deepEqual(folderPath(fx,scene.folder),['Viscanon','Chapter 1','Saltmarsh Environs','Scenes']);
+  fx.command.entry.type='character';fx.command.entry.category='character';
+  const actor=await fx.actions.createScene(fx.command,true);
+  assert.deepEqual(folderPath(fx,actor.folder),['Viscanon','Chapter 1','Saltmarsh Environs','Characters']);
+  assert.equal(fx.world.folders.contents.filter(f=>f.name==='Saltmarsh Environs').length,1);
+  assert.equal(fx.createdScenes.every(s=>s.ownership.default===0),true);
+  assert.doesNotMatch(JSON.stringify(fx.world.folders.contents.map(f=>f.flags)),/Saltmarsh|20000000/);
+ }finally{fx.restore();}
+});
+test('twelve ancestors fit native four levels and preserve GM-renamed location and category folders',async()=>{
+ const fx=actionFixture(),before=globalThis.CONST;try{
+  globalThis.CONST={FOLDER_MAX_DEPTH:4};const names=Array.from({length:12},(_,i)=>`Location ${i+1}`);organize(fx,'scene',names);
+  const scene=await fx.actions.createScene(fx.command,true);
+  assert.deepEqual(folderPath(fx,scene.folder),['Viscanon','Chapter 1',names.join(' — '),'Scenes']);
+  const folder=fx.world.folders.contents.find(f=>f.id===scene.folder);folder.name='GM custom scenes';
+  const location=fx.world.folders.contents.find(f=>f.id===folder.folder);location.name='GM custom cells';
+  const snapshot=structuredClone(fx.world.folders.contents);
+  const again=await fx.actions.createScene(fx.command,true);
+  assert.equal(again.folder,scene.folder);assert.deepEqual(fx.world.folders.contents,snapshot);
+  fx.command.entry.type='character';fx.command.entry.category='character';
+  const character=await fx.actions.createScene(fx.command,true);
+  assert.deepEqual(folderPath(fx,character.folder),['Viscanon','Chapter 1','GM custom cells','Characters']);
+  assert.equal(globalThis.CONST.FOLDER_MAX_DEPTH,4);
+ }finally{globalThis.CONST=before;fx.restore();}
+});
+
+test('same full location labels never merge distinct canonical UUID paths',async()=>{
+ const fx=actionFixture();try{
+  organize(fx,'location',['Barracks','Basement']);
+  const first=await fx.actions.createScene(fx.command,true);
+  assert.deepEqual(folderPath(fx,first.folder),['Viscanon','Chapter 1','Barracks — Basement']);
+  const original=structuredClone(fx.world.folders.contents);
+  fx.command.entry.sceneOrganization.locations[0].id=locationId(40);
+  const second=await fx.actions.createScene(fx.command,true);
+  const secondFolder=fx.world.folders.contents.find(f=>f.id===second.folder);
+  assert.notEqual(second.folder,first.folder);
+  assert.match(secondFolder.name,/^Barracks — Basement \[[a-f0-9]{8}\]$/);
+  assert.deepEqual(fx.world.folders.contents.slice(0,original.length),original);
+  const snapshot=structuredClone(fx.world.folders.contents);
+  assert.equal((await fx.actions.createScene(fx.command,true)).folder,second.folder);
+  assert.deepEqual(fx.world.folders.contents,snapshot);
+  // Separator characters in a canonical name may create the same full label,
+  // but the complete UUID path still identifies another location folder.
+  fx.command.entry.sceneOrganization.locations=[{id:locationId(50),name:'Barracks — Basement'}];
+  const third=await fx.actions.createScene(fx.command,true);
+  assert.notEqual(third.folder,first.folder);assert.notEqual(third.folder,second.folder);
+  assert.match(fx.world.folders.contents.find(f=>f.id===third.folder).name,/^Barracks — Basement \[[a-f0-9]{8}\]$/);
+  assert.doesNotMatch(JSON.stringify(fx.world.folders.contents.map(f=>f.flags)),/Barracks|Basement|20000000/);
+ }finally{fx.restore();}
+});
+
+test('different named ancestors create unambiguous unsuffixed sibling labels',async()=>{
+ const fx=actionFixture();try{
+  organize(fx,'location',['North','Cell']);const north=await fx.actions.createScene(fx.command,true);
+  fx.command.entry.sceneOrganization.locations[0]={id:locationId(40),name:'South'};
+  const south=await fx.actions.createScene(fx.command,true);
+  assert.deepEqual(folderPath(fx,north.folder),['Viscanon','Chapter 1','North — Cell']);
+  assert.deepEqual(folderPath(fx,south.folder),['Viscanon','Chapter 1','South — Cell']);
+ }finally{fx.restore();}
+});
+
+test('old recursive folders and Scenes remain unchanged beside new flat location folders',async()=>{
+ const fx=actionFixture();try{
+  organize(fx,'location',['Coast']);const own=await fx.actions.createScene(fx.command,true);
+  organize(fx,'scene',['Coast','Prison']);const plan=await sceneFolderPlan(fx.command,4);
+  const chapter=fx.world.folders.contents.find(row=>row.id===own.folder).folder;
+  fx.world.folders.contents.push({id:'old-nested',type:'Scene',name:'GM old prison',folder:own.folder,
+   flags:{'viscanon-bridge':{workspaceFolder:'location',folderKey:plan.steps[1].key}}});
+  fx.world.folders.contents.push({id:'old-category',type:'Scene',name:'Old scenes',folder:'old-nested',
+   flags:{'viscanon-bridge':{workspaceFolder:'category',folderKey:plan.steps[2].key}}});
+  const oldScene={name:'Old artwork Scene',folder:'old-category'};fx.createdScenes.push(oldScene);
+  const folders=structuredClone(fx.world.folders.contents),sceneSnapshot=structuredClone(oldScene);
+  const fresh=await fx.actions.createScene(fx.command,true);
+  assert.deepEqual(folderPath(fx,fresh.folder),['Viscanon','Chapter 1','Coast — Prison','Scenes']);
+  assert.deepEqual(fx.world.folders.contents.slice(0,folders.length),folders);assert.deepEqual(oldScene,sceneSnapshot);
+  const flat=fx.world.folders.contents.find(row=>row.name==='Coast — Prison');assert.equal(flat.folder,chapter);
+ }finally{fx.restore();}
+});
+
+test('unmarked same-name chapters and locations are not adopted as managed identities',async()=>{
+ const fx=actionFixture();try{
+  organize(fx,'location',['Coast']);
+  fx.world.folders.contents.push({id:'root',type:'Scene',name:'Viscanon',folder:null,flags:{'viscanon-bridge':{workspaceFolder:'root'}}},
+   {id:'unrelated-chapter',type:'Scene',name:'Chapter 1',folder:'root'},
+   {id:'unrelated-location',type:'Scene',name:'Coast',folder:'unrelated-chapter'});
+  const original=structuredClone(fx.world.folders.contents);
+  const scene=await fx.actions.createScene(fx.command,true);
+  const location=fx.world.folders.contents.find(row=>row.id===scene.folder);
+  assert.notEqual(location.folder,'unrelated-chapter');assert.notEqual(location.id,'unrelated-location');
+  assert.deepEqual(fx.world.folders.contents.slice(0,original.length),original);
+ }finally{fx.restore();}
+});
+
+test('association change or authority loss during folder creation cannot create a Scene',async()=>{
+ for(const change of ['association','authority']){
+  const fx=actionFixture();try{
+   organize(fx,'scene',['Coast']);const create=globalThis.CONFIG.Folder.documentClass.create;
+   globalThis.CONFIG.Folder.documentClass.create=async data=>{const f=await create(data);
+    if(data.flags?.['viscanon-bridge']?.workspaceFolder==='location'){
+     if(change==='association')fx.command.entry.sceneOrganization.locations[0].id=locationId(99);
+     else fx.world.user={id:'player',isGM:false};
+    }return f;};
+   await assert.rejects(fx.actions.createScene(fx.command,true),change==='association'?/location changed/:/GM|active/);
+   assert.equal(fx.createdScenes.length,0);
+  }finally{fx.restore();}
+ }
+});
+
+test('no-location and unresolved projections reuse the existing chapter/category folder across an upgrade',async()=>{
+ const fx=actionFixture();try{
+  organize(fx,'scene',['Coast']);delete fx.command.entry.sceneOrganization;
+  const legacy=await fx.actions.createScene(fx.command,true);
+  const folder=fx.world.folders.contents.find(row=>row.id===legacy.folder);folder.name='GM custom scenes';
+  const snapshot=structuredClone(fx.world.folders.contents);
+  for(const status of ['none','unresolved']){
+   fx.command.entry.sceneOrganization={version:1,status,reason:status==='none'?'':'missing',locations:[]};
+   const next=await fx.actions.createScene(fx.command,true);
+   assert.equal(next.folder,legacy.folder);assert.deepEqual(fx.world.folders.contents,snapshot);
+  }
  }finally{fx.restore();}
 });

@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { chromium } from 'playwright';
+import { chromium, webkit } from 'playwright';
+const browserType = process.env.VISCANON_BROWSER_ENGINE === 'webkit' ? webkit : chromium;
 
 const source = readFileSync(new URL('../scripts/bridge-core.mjs', import.meta.url), 'utf8');
 const legacySource = process.env.VISCANON_LEGACY_REF
@@ -13,8 +14,8 @@ const code = 'a'.repeat(64);
 const eventId = '20000000-0000-4000-8000-000000000001';
 const fixtureOrigin = 'http://foundry.invalid';
 
-test('native Chromium rejects the legacy receiver and pairs, polls and delivers with bound defaults', async () => {
-  const browser = await chromium.launch({ headless: true, timeout: 3000, ...(process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {}) });
+test('native browser rejects the legacy receiver and pairs, polls and delivers with bound defaults', async () => {
+  const browser = await browserType.launch({ headless: true, timeout: 3000, ...(browserType === chromium && process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {}) });
   try {
     const context = await browser.newContext({ serviceWorkers: 'block' });
     const page = await context.newPage();
@@ -28,9 +29,10 @@ test('native Chromium rejects the legacy receiver and pairs, polls and delivers 
       'content-type': 'application/json'
     };
 
-    // Every network request is intercepted. The real browser fetch and timers
+    // Every HTTP network request is intercepted; native blob module loading is local.
+    // The real browser fetch and timers
     // remain untouched; this test never sends a request to production Supabase.
-    await page.route('**/*', async route => {
+    await page.route(/^https?:\/\//, async route => {
       const request = route.request();
       if (request.url() === `${fixtureOrigin}/`) {
         await route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Native Foundry bridge fixture</title>' });
@@ -96,7 +98,9 @@ test('native Chromium rejects the legacy receiver and pairs, polls and delivers 
       }, { moduleSource: legacySource, code });
       assert.equal(failed.failed, true, 'the frozen legacy module must reproduce the browser failure');
       assert.equal(failed.name, 'TypeError');
-      assert.match(failed.message, /Illegal invocation/i);
+      assert.match(failed.message, browserType === webkit
+        ? /^Can only call Window\.(?:fetch|setTimeout|clearTimeout) on instances of Window$/
+        : /Illegal invocation/i);
       assert.equal(requests.length, 0, 'the legacy invocation fails before any bridge request');
     }
 

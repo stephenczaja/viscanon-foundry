@@ -1,12 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { chromium } from 'playwright';
+import { chromium, webkit } from 'playwright';
+const browserType = process.env.VISCANON_BROWSER_ENGINE === 'webkit' ? webkit : chromium;
 
 const runtime = readFileSync(new URL('../scripts/viscanon-bridge.mjs', import.meta.url), 'utf8');
 const core = readFileSync(new URL('../scripts/bridge-core.mjs', import.meta.url), 'utf8');
 const workspaceCore = readFileSync(new URL('../scripts/workspace-core.mjs', import.meta.url), 'utf8');
 const workspaceActions = readFileSync(new URL('../scripts/workspace-actions.mjs', import.meta.url), 'utf8');
+const workspaceSceneFolders = readFileSync(new URL('../scripts/workspace-scene-folders.mjs', import.meta.url), 'utf8');
 const workspacePin = readFileSync(new URL('../scripts/workspace-pin.mjs', import.meta.url), 'utf8');
 const workspaceNames = readFileSync(new URL('../scripts/workspace-names.mjs', import.meta.url), 'utf8');
 const workspaceUi = readFileSync(new URL('../scripts/workspace-ui.mjs', import.meta.url), 'utf8');
@@ -82,7 +84,7 @@ function fixtureSetup() {
 }
 
 test('native browser renders artwork-only status and scoped artwork spacing without altering ordinary popouts', async () => {
-  const browser = await chromium.launch({ headless: true, timeout: 3000, ...(process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {}) });
+  const browser = await browserType.launch({ headless: true, timeout: 3000, ...(browserType === chromium && process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {}) });
   try {
     const page = await browser.newPage({ serviceWorkers: 'block' });
     page.setDefaultTimeout(3000);
@@ -102,6 +104,7 @@ test('native browser renders artwork-only status and scoped artwork spacing with
       if (url === `${origin}/scripts/bridge-core.mjs`) return route.fulfill({ contentType: 'text/javascript', body: core });
       if (url === `${origin}/scripts/workspace-core.mjs`) return route.fulfill({ contentType: 'text/javascript', body: workspaceCore });
       if (url === `${origin}/scripts/workspace-actions.mjs`) return route.fulfill({ contentType: 'text/javascript', body: workspaceActions });
+      if (url === `${origin}/scripts/workspace-scene-folders.mjs`) return route.fulfill({ contentType: 'text/javascript', body: workspaceSceneFolders });
       if (url === `${origin}/scripts/workspace-pin.mjs`) return route.fulfill({ contentType: 'text/javascript', body: workspacePin });
       if (url === `${origin}/scripts/workspace-names.mjs`) return route.fulfill({ contentType: 'text/javascript', body: workspaceNames });
       if (url === `${origin}/scripts/workspace-ui.mjs`) return route.fulfill({ contentType: 'text/javascript', body: workspaceUi });

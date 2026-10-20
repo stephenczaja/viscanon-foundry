@@ -1,3 +1,4 @@
+import { validateSceneOrganization } from './workspace-scene-folders.mjs';
 import { BridgeHttpError, DEFAULT_ENDPOINT, TOKEN_PATTERN, normalizeCode, safeArtworkUrl } from './bridge-core.mjs';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -12,6 +13,7 @@ function label(value, limit = 120) {
 /** Workspace payloads are GM-only, but still treated as untrusted network input. */
 export function validateWorkspaceCommand(command, endpoint = DEFAULT_ENDPOINT, now = Date.now()) {
   if (!command || !UUID.test(command.id ?? '') || !UUID.test(command.campaignId ?? '')
+    || command.intent !== undefined && command.intent !== 'token'
     || command.action !== 'open' || typeof command.expiresAt !== 'string'
     || !Number.isFinite(Date.parse(command.expiresAt))
     || Date.parse(command.expiresAt) <= now) return null;
@@ -22,6 +24,7 @@ export function validateWorkspaceCommand(command, endpoint = DEFAULT_ENDPOINT, n
     || entry.battlemapFingerprint != null && !FINGERPRINT.test(entry.battlemapFingerprint)) return null;
   const image = safeArtworkUrl(entry.image, endpoint);
   const battlemap = entry.battlemap ? safeArtworkUrl(entry.battlemap, endpoint) : null;
+  if (command.intent === 'token' && (entry.battlemap || entry.battlemapFingerprint != null)) return null;
   if (!image || (entry.battlemap && !battlemap)
     || Boolean(battlemap) !== Boolean(entry.battlemapFingerprint)) return null;
   const title = label(entry.title, 240);
@@ -29,9 +32,13 @@ export function validateWorkspaceCommand(command, endpoint = DEFAULT_ENDPOINT, n
   const type = label(entry.type, 64);
   const category = label(entry.category, 64);
   if (!ENTRY_CATEGORIES.has(type) || category !== type) return null;
+  const sceneOrganization = entry.sceneOrganization === undefined ? undefined : validateSceneOrganization(entry.sceneOrganization);
+  if (entry.sceneOrganization !== undefined && (!sceneOrganization
+    || type === 'location' && sceneOrganization.status === 'resolved' && sceneOrganization.locations.at(-1).id !== entry.id.toLowerCase())) return null;
   return {
     id: command.id,
     action: 'open',
+    ...(command.intent === 'token' ? {intent:'token'} : {}),
     campaignId: command.campaignId,
     expiresAt: Date.parse(command.expiresAt),
     entry: {
@@ -47,6 +54,7 @@ export function validateWorkspaceCommand(command, endpoint = DEFAULT_ENDPOINT, n
       breadcrumbs: Array.isArray(entry.breadcrumbs) ? entry.breadcrumbs.slice(0, 16).map(value => label(value, 240)).filter(Boolean) : [],
       chapterId: entry.chapterId || null,
       category,
+      ...(sceneOrganization ? {sceneOrganization} : {}),
       image,
       battlemap,
       revealed: entry.revealed
@@ -224,7 +232,8 @@ export class WorkspaceController {
       data = await this.request({ action: 'workspace-action-check', session, id: command.id,
         campaignId: command.campaignId, entryId: entry.id, entryType: entry.type,
         artworkFingerprint: entry.artworkFingerprint,
-        battlemapFingerprint: entry.battlemapFingerprint || null });
+        battlemapFingerprint: entry.battlemapFingerprint || null,
+        ...(command.intent === 'token' ? {intent:'token'} : {}) });
     } catch (error) {
       if ([404, 409].includes(error?.status)) {
         throw new Error('This Send to Foundry request changed. Send the entry again.');
@@ -238,8 +247,9 @@ export class WorkspaceController {
     // The 15-second command expiry is a delivery TTL, not the GM's decision
     // deadline. Fresh signed URLs get a separate bounded action window.
     const fresh = validateWorkspaceCommand({ id: command.id, action: 'open', campaignId: command.campaignId,
-      expiresAt: new Date(Date.now() + 90_000).toISOString(), entry: data?.entry }, this.endpoint);
-    if (!fresh || fresh.entry.id !== entry.id || fresh.entry.type !== entry.type
+      expiresAt: new Date(Date.now() + 90_000).toISOString(), entry: data?.entry,
+      ...(data?.intent !== undefined ? {intent:data.intent} : {}) }, this.endpoint);
+    if (!fresh || fresh.intent !== command.intent || fresh.entry.id !== entry.id || fresh.entry.type !== entry.type
       || fresh.entry.artworkFingerprint !== entry.artworkFingerprint
       || fresh.entry.battlemapFingerprint !== (entry.battlemapFingerprint || null)) {
       throw new Error('This entry’s artwork or map changed. Send it to Foundry again.');
@@ -310,7 +320,7 @@ export class WorkspaceController {
       // the same receiver session, cannot resume its unfinished commands.
       const receiveNonce = this.randomReceiveNonce();
       if (!UUID.test(receiveNonce ?? '')) throw new Error('Invalid Foundry receive nonce.');
-      const data = await this.request({ action: 'workspace-poll', session: this.session, receiveNonce, pins });
+      const data = await this.request({ action: 'workspace-poll', session: this.session, receiveNonce, pins, supportsToken:true });
       if (!data || data.receiveNonce !== receiveNonce || !Array.isArray(data.commands)
         || data.commands.length > 10) throw new Error('Invalid workspace response.');
       for (const raw of data.commands) {

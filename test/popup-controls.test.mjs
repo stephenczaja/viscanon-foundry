@@ -15,6 +15,7 @@ class Element {
     this.value = '';
     this.isConnected = true;
     this.listeners = new Map();
+    this.attributes = new Map();
   }
   set textContent(value) { this.text = String(value); this.children = []; }
   get textContent() { return (this.text ?? '') + this.children.map(child => child.textContent).join(''); }
@@ -22,7 +23,8 @@ class Element {
     for (const child of children) { child.parent = this; this.children.push(child); }
   }
   replaceChildren(...children) { this.children = []; this.append(...children); }
-  setAttribute() {}
+  setAttribute(name, value) { this.attributes.set(name, String(value)); }
+  getAttribute(name) { return this.attributes.get(name) ?? null; }
   addEventListener(type, callback) { this.listeners.set(type, callback); }
   closest(selector) {
     for (let node = this.parent; node; node = node.parent) if (node.tagName === selector) return node;
@@ -53,9 +55,18 @@ function command(expiresAt = Date.now() + 60_000) {
       image: 'https://xzievefbzeyvefazppvj.supabase.co/storage/v1/object/sign/artwork/private.webp?token=synthetic' } };
 }
 
-async function popup(initial, checkAction, isAuthorized = () => true) {
+function tokenCommand(expiresAt) {
+  const value = command(expiresAt);
+  value.intent = 'token';
+  value.entry.image = 'https://xzievefbzeyvefazppvj.supabase.co/storage/v1/object/sign/artwork/generated-token.png?token=synthetic';
+  value.entry.battlemap = '';
+  value.entry.battlemapFingerprint = null;
+  return value;
+}
+
+async function popup(initial, checkAction, isAuthorized = () => true, actors = [{id:'actor-1',name:'Existing actor'}]) {
   const original = Object.fromEntries(['document', 'foundry', 'game', 'ui'].map(key => [key, globalThis[key]]));
-  const messages = [], mutations = [], checks = [];
+  const messages = [], mutations = [], checks = [], prefetches = [];
   globalThis.document = { createElement: tag => new Element(tag) };
   globalThis.foundry = { applications: { api: { ApplicationV2: class {
     _onRender() {}
@@ -64,18 +75,19 @@ async function popup(initial, checkAction, isAuthorized = () => true) {
     async maximize() {}
   } } } };
   globalThis.game = { scenes: { contents: [{ id: 'scene-1', name: 'Map' }], current: { id: 'scene-1' } },
-    actors: { contents: [{id:'actor-1',name:'Existing actor'}] } };
+    actors: { contents: actors } };
   globalThis.ui = { notifications: { info: value => messages.push(['info', value]),
     error: value => messages.push(['error', value]) } };
   const actions = {
     legacyPins: () => [{id:'legacy-pin'}],
-    actorTypes: () => [], prefetchArtwork: async () => {},
+    actorTypes: () => ['npc','character'], prefetchArtwork: async (...args) => { prefetches.push(args); },
     assertFresh: value => { if (value.expiresAt <= Date.now()) throw new Error('Request expired.'); },
     revealArtwork: async value => { mutations.push(value); },
     placePin: async value => { mutations.push(['pin', value]); return { folderStatus: 'root' }; },
     createScene: async value => { mutations.push(['scene', value]); return { name: 'Created' }; },
     viewScene: async value => { mutations.push(['view',value]); },
-    attachActor: async (value, ...args) => { mutations.push(['actor', value, ...args]); return { name: 'Created' }; }
+    attachActor: async (value, ...args) => { mutations.push(['actor', value, ...args]); return { name: 'Created' }; },
+    attachToken: async (value, ...args) => { mutations.push(['token', value, ...args]); return { id: args[0] || 'created-actor', name: 'Token actor' }; }
   };
   const Popup = createWorkspaceApplication(initial, actions, () => {}, isAuthorized,
     async value => { checks.push(value); return checkAction(value); });
@@ -84,7 +96,7 @@ async function popup(initial, checkAction, isAuthorized = () => true) {
   app._onRender({}, {});
   await Promise.resolve();
   return {
-    app, actions, checks, messages, mutations,
+    app, actions, checks, messages, mutations, prefetches,
     restore() {
       for (const [key, value] of Object.entries(original)) {
         if (value === undefined) delete globalThis[key];
@@ -149,6 +161,84 @@ test('Pin visibility label directly contains the dropdown while its preview is a
  }finally{fx.restore();}
 });
 
+test('workspace copy is exact and the renamed actor card has no explanatory paragraph or card icons',async()=>{
+ const fresh=command(),fx=await popup(fresh,async()=>fresh);
+ try {
+  const sections=fx.app.element.querySelectorAll('.viscanon-bridge-workspace-section');
+  assert.equal(sections[0].children[1].textContent,'Show this artwork as a popup to everyone connected to Foundry and reveal in Viscanon.');
+  assert.equal(sections[1].children[1].textContent,'Place a pin on the current scene. Double-click the pin to view this artwork. Click to place; Escape to cancel.');
+  const actor=sections[3];assert.equal(actor.children[0].textContent,'Attach artwork to actor');
+  assert.equal(actor.children.some(child=>child.tagName==='p'),false);
+  for(const section of sections)assert.equal(section.children[0].tagName,'h3');
+ }finally{fx.restore();}
+});
+
+test('actor modes expose only their own dropdown and sort a copied world actor list alphabetically',async()=>{
+ const fresh=command(),actors=[{id:'z',name:'Zephyr'},{id:'b',name:'beta'},{id:'a2',name:'Alpha 2'},{id:'a10',name:'Alpha 10'},{id:'a1',name:'Alpha 1'}];
+ const original=actors.slice(),fx=await popup(fresh,async()=>fresh,()=>true,actors);
+ try {
+  const root=fx.app.element,actor=root.querySelector('[data-workspace-field="actor"]'),type=root.querySelector('[data-workspace-field="actor-type"]');
+  const create=root.querySelector('[data-workspace-field="actor-mode-create"]'),select=root.querySelector('[data-workspace-field="actor-mode-select"]');
+  assert.equal(create.textContent,'Create new actor');assert.equal(select.textContent,'Select an actor');
+  assert.equal(create.parent.getAttribute('role'),'group');assert.equal(create.parent.getAttribute('aria-label'),'Actor action');
+  assert.equal(create.getAttribute('aria-pressed'),'true');assert.equal(select.getAttribute('aria-pressed'),'false');
+  assert.equal(actor.closest('label').hidden,true);assert.equal(actor.disabled,true);assert.equal(type.closest('label').hidden,false);assert.equal(type.disabled,false);
+  assert.deepEqual(actor.options.map(o=>o.textContent),['Choose an actor','Alpha 1','Alpha 2','Alpha 10','beta','Zephyr']);assert.deepEqual(actors,original);
+  await select.click();assert.equal(actor.closest('label').hidden,false);assert.equal(actor.disabled,false);assert.equal(type.closest('label').hidden,true);assert.equal(type.disabled,true);
+  assert.equal(select.getAttribute('aria-pressed'),'true');assert.equal(create.getAttribute('aria-pressed'),'false');
+  assert.equal(root.querySelector('[data-workspace-action="actor"]').disabled,true);
+  actor.value='b';actor.listeners.get('change')();assert.equal(root.querySelector('[data-workspace-action="actor"]').disabled,false);
+  await create.click();assert.equal(actor.closest('label').hidden,true);assert.equal(type.closest('label').hidden,false);assert.equal(actor.value,'b','the choice survives a mode round-trip');
+ }finally{fx.restore();}
+});
+
+test('create mode sends no existing actor id even when a prior selection is retained',async()=>{
+ const fresh=command(),fx=await popup(fresh,async()=>fresh);
+ try {
+  const root=fx.app.element,actor=root.querySelector('[data-workspace-field="actor"]'),type=root.querySelector('[data-workspace-field="actor-type"]');
+  await root.querySelector('[data-workspace-field="actor-mode-select"]').click();actor.value='actor-1';actor.listeners.get('change')();
+  await root.querySelector('[data-workspace-field="actor-mode-create"]').click();type.value='character';
+  await root.querySelector('[data-workspace-action="actor"]').click();
+  assert.deepEqual(fx.mutations[0].slice(0,4),['actor',fresh,'','character']);
+  assert.equal(fx.messages[0][1],'Actor created.');
+ }finally{fx.restore();}
+});
+
+test('select mode cannot fall back to creation when the world has no actors',async()=>{
+ const fresh=command(),fx=await popup(fresh,async()=>fresh,()=>true,[]);
+ try {
+  const root=fx.app.element;await root.querySelector('[data-workspace-field="actor-mode-select"]').click();
+  assert.equal(root.querySelector('[data-workspace-field="actor"]').options[0].textContent,'No actors available');
+  const button=root.querySelector('[data-workspace-action="actor"]');assert.equal(button.disabled,true);
+  await button.click();assert.deepEqual(fx.mutations,[]);assert.match(fx.messages.at(-1)[1],/Choose an existing actor/);
+ }finally{fx.restore();}
+});
+
+test('an in-flight actor attachment cannot change mode or target during server validation',async()=>{
+ const fresh=command();let release;const waiting=new Promise(resolve=>{release=resolve;});
+ const fx=await popup(fresh,async()=>{await waiting;return fresh;});
+ try {
+  const root=fx.app.element,actor=root.querySelector('[data-workspace-field="actor"]'),type=root.querySelector('[data-workspace-field="actor-type"]');
+  const create=root.querySelector('[data-workspace-field="actor-mode-create"]'),select=root.querySelector('[data-workspace-field="actor-mode-select"]');
+  await select.click();actor.value='actor-1';actor.listeners.get('change')();
+  const running=root.querySelector('[data-workspace-action="actor"]').click();
+  assert.equal(create.disabled,true);assert.equal(select.disabled,true);assert.equal(actor.disabled,true);assert.equal(type.disabled,true);
+  await create.click();actor.value='unrelated-actor';release();await running;
+  assert.equal(fx.mutations[0][2],'actor-1');assert.equal(select.getAttribute('aria-pressed'),'true');
+ }finally{fx.restore();}
+});
+
+test('actor mode controls do not expose the other panel after account authorization changes',async()=>{
+ let active=true;const fresh=command(),fx=await popup(fresh,async()=>fresh,()=>active);
+ try {
+  active=false;const root=fx.app.element;
+  await root.querySelector('[data-workspace-field="actor-mode-select"]').click();
+  assert.equal(root.querySelector('[data-workspace-field="actor"]').closest('label').hidden,true);
+  assert.equal(root.querySelector('[data-workspace-field="actor-mode-create"]').getAttribute('aria-pressed'),'true');
+  assert.deepEqual(fx.checks,[]);assert.deepEqual(fx.mutations,[]);
+ }finally{fx.restore();}
+});
+
 test('simplified popup keeps actor selection and attachment and exposes three distinct labeled pin icons',async()=>{
  const fresh=command();const fx=await popup(fresh,async()=>fresh);
  try {
@@ -157,7 +247,8 @@ test('simplified popup keeps actor selection and attachment and exposes three di
   assert.equal(root.querySelector('[data-workspace-field="actor-search"]'),null);
   assert.equal(root.querySelector('[data-workspace-action="link-pin"]'),null);
   const actor=root.querySelector('[data-workspace-field="actor"]');
-  assert.deepEqual(actor.options.map(o=>o.value),['','actor-1']);actor.value='actor-1';
+  assert.deepEqual(actor.options.map(o=>o.value),['','actor-1']);
+  await root.querySelector('[data-workspace-field="actor-mode-select"]').click();actor.value='actor-1';
   actor.listeners.get('change')();
   assert.equal(root.querySelector('[data-workspace-field="actor-type"]').closest('label').hidden,true);
   await root.querySelector('[data-workspace-action="actor"]').click();
@@ -230,5 +321,141 @@ test('a map-only change cannot proceed from the original popup', async () => {
     await fx.app.element.querySelector('[data-workspace-action="reveal"]').click();
     assert.deepEqual(fx.mutations, []);
     assert.match(fx.messages[0][1], /request changed/);
+  } finally { fx.restore(); }
+});
+
+test('token intent renders only the actor card, exact token preview and shared actor modes', async () => {
+  const fresh = tokenCommand();
+  const actors = [{ id: 'z', name: 'Zephyr' }, { id: 'a', name: 'Ambrose' }];
+  const fx = await popup(fresh, async () => fresh, () => true, actors);
+  try {
+    const root = fx.app.element;
+    assert.equal(fx.app.constructor.DEFAULT_OPTIONS.window.title, 'Attach token to actor');
+    assert.match(root.className, /viscanon-bridge-workspace-token/);
+    const sections = root.querySelectorAll('.viscanon-bridge-workspace-section');
+    assert.equal(sections.length, 1);
+    assert.equal(sections[0].children[0].textContent, 'Attach token to actor');
+    assert.equal(root.querySelector('.viscanon-bridge-workspace-preview').src, fresh.entry.image);
+    assert.equal(root.querySelector('.viscanon-bridge-workspace-preview').alt, 'GM token preview of Private artwork');
+    assert.deepEqual(root.querySelectorAll('[data-workspace-action]').map(button => button.dataset.workspaceAction), ['actor']);
+    assert.equal(root.querySelector('[data-workspace-action="actor"]').textContent, 'Attach token');
+    assert.equal(root.querySelector('[data-workspace-field="visibility"]'), null);
+    assert.deepEqual(fx.prefetches, [[fresh]], 'prefetches only the exact token image');
+    const actor = root.querySelector('[data-workspace-field="actor"]');
+    const type = root.querySelector('[data-workspace-field="actor-type"]');
+    assert.equal(actor.closest('label').hidden, true);
+    assert.equal(type.closest('label').hidden, false);
+    await root.querySelector('[data-workspace-field="actor-mode-select"]').click();
+    assert.equal(actor.closest('label').hidden, false);
+    assert.equal(type.closest('label').hidden, true);
+    assert.deepEqual(actor.options.map(item => item.textContent), ['Choose an actor', 'Ambrose', 'Zephyr']);
+    assert.deepEqual(actors.map(item => item.id), ['z', 'a'], 'world collection order is preserved');
+  } finally { fx.restore(); }
+});
+
+test('token creation uses only attachToken and caches its successful actor against repeat clicks', async () => {
+  const fresh = tokenCommand(), fx = await popup(fresh, async () => fresh);
+  try {
+    const root = fx.app.element, button = root.querySelector('[data-workspace-action="actor"]');
+    root.querySelector('[data-workspace-field="actor-type"]').value = 'character';
+    await button.click();
+    assert.deepEqual(fx.mutations, [['token', fresh, '', 'character', false, true]]);
+    assert.equal(fx.app._attachedTokenActor.id, 'created-actor');
+    assert.equal(fx.messages.at(-1)[1], 'Actor created and token attached.');
+    assert.equal(button.textContent, 'Token attached');
+    assert.equal(button.disabled, true);
+    assert.equal(root.querySelector('[data-workspace-field="actor-type"]').disabled, true);
+    await root.querySelector('[data-workspace-field="actor-mode-select"]').click();
+    assert.equal(root.querySelector('[data-workspace-field="actor-mode-create"]').getAttribute('aria-pressed'), 'true');
+    await button.click();
+    assert.equal(fx.checks.length, 1);
+    assert.equal(fx.mutations.length, 1);
+  } finally { fx.restore(); }
+});
+
+test('token attachment snapshots the existing actor and blocks overlapping clicks', async () => {
+  const delivered = tokenCommand(), fresh = tokenCommand();
+  fresh.entry.image += '-renewed';
+  let release;
+  const waiting = new Promise(resolve => { release = resolve; });
+  const fx = await popup(delivered, async () => { await waiting; return fresh; });
+  try {
+    const root = fx.app.element, actor = root.querySelector('[data-workspace-field="actor"]');
+    await root.querySelector('[data-workspace-field="actor-mode-select"]').click();
+    actor.value = 'actor-1'; actor.listeners.get('change')();
+    const button = root.querySelector('[data-workspace-action="actor"]');
+    const running = button.click();
+    await button.click();
+    await root.querySelector('[data-workspace-field="actor-mode-create"]').click();
+    actor.value = 'unrelated-actor';
+    release(); await running; await button.click();
+    assert.equal(fx.checks.length, 1);
+    assert.deepEqual(fx.mutations, [['token', fresh, 'actor-1', '', false, true]]);
+    assert.equal(fx.messages.at(-1)[1], 'Token attached to Token actor.');
+  } finally { fx.restore(); }
+});
+
+test('failed token attachment can retry and only a successful actor is cached', async () => {
+  const fresh = tokenCommand(), fx = await popup(fresh, async () => fresh);
+  try {
+    const original = fx.actions.attachToken;
+    let attempts = 0;
+    fx.actions.attachToken = async (...args) => {
+      if (++attempts === 1) throw new Error('Token upload failed.');
+      return original(...args);
+    };
+    const button = fx.app.element.querySelector('[data-workspace-action="actor"]');
+    await button.click();
+    assert.equal(fx.app._attachedTokenActor, undefined);
+    assert.equal(button.disabled, false);
+    assert.equal(button.textContent, 'Attach token');
+    await button.click(); await button.click();
+    assert.equal(attempts, 2);
+    assert.equal(fx.mutations.length, 1);
+    assert.equal(button.disabled, true);
+  } finally { fx.restore(); }
+});
+
+test('changed token intent or token bytes cannot invoke an attachment', async () => {
+  for (const change of [value => { delete value.intent; }, value => { value.entry.artworkFingerprint = 'b'.repeat(64); }]) {
+    const delivered = tokenCommand(), changed = tokenCommand(); change(changed);
+    const fx = await popup(delivered, async () => changed);
+    try {
+      await fx.app.element.querySelector('[data-workspace-action="actor"]').click();
+      assert.deepEqual(fx.mutations, []);
+      assert.match(fx.messages.at(-1)[1], /request changed/);
+    } finally { fx.restore(); }
+  }
+  const delivered = command(), changed = tokenCommand();
+  const fx = await popup(delivered, async () => changed);
+  try {
+    await fx.app.element.querySelector('[data-workspace-action="reveal"]').click();
+    assert.deepEqual(fx.mutations, []);
+    assert.match(fx.messages.at(-1)[1], /request changed/);
+  } finally { fx.restore(); }
+});
+
+test('token selection without actors cannot fall back to creation', async () => {
+  const fresh = tokenCommand(), fx = await popup(fresh, async () => fresh, () => true, []);
+  try {
+    const root = fx.app.element;
+    await root.querySelector('[data-workspace-field="actor-mode-select"]').click();
+    const button = root.querySelector('[data-workspace-action="actor"]');
+    assert.equal(button.disabled, true);
+    await button.click();
+    assert.deepEqual(fx.mutations, []);
+    assert.match(fx.messages.at(-1)[1], /Choose an existing actor/);
+  } finally { fx.restore(); }
+});
+
+test('account authorization lost during token validation blocks attachment', async () => {
+  let active = true;
+  const fresh = tokenCommand();
+  const fx = await popup(fresh, async () => { active = false; return fresh; }, () => active);
+  try {
+    await fx.app.element.querySelector('[data-workspace-action="actor"]').click();
+    assert.deepEqual(fx.mutations, []);
+    assert.equal(fx.app._attachedTokenActor, undefined);
+    assert.match(fx.messages.at(-1)[1], /request changed/);
   } finally { fx.restore(); }
 });
