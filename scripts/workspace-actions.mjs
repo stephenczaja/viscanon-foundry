@@ -1,3 +1,4 @@
+import { sceneFolderPlan, sceneOrganizationIdentity } from './workspace-scene-folders.mjs';
 import { createPinPlacement, isWorkspaceNote } from './workspace-pin.mjs';
 import { DEFAULT_ENDPOINT, MODULE_ID, safeArtworkUrl } from './bridge-core.mjs';
 import { numberedNameFlag } from './workspace-names.mjs';
@@ -115,6 +116,7 @@ export function createWorkspaceActions({
   const boundUserId = world.user?.id;
   const downloads = new Map();
   const uploads = new Map();
+  const tokenAttachments = new Map();
   let pinCursor = 0;
   let destroyed = false;
   const privatePopouts = new Set();
@@ -135,7 +137,7 @@ export function createWorkspaceActions({
     assertGM();
     const current = await checkAction(command);
     assertGM();
-    if (current?.id !== command.id || current.campaignId !== command.campaignId
+    if (current?.id !== command.id || current.intent !== command.intent || current.campaignId !== command.campaignId
       || current.entry?.id !== command.entry?.id || current.entry.type !== command.entry.type
       || current.entry.artworkFingerprint !== command.entry.artworkFingerprint
       || (current.entry.battlemapFingerprint ?? null) !== (command.entry.battlemapFingerprint ?? null)) {
@@ -178,6 +180,12 @@ export function createWorkspaceActions({
         const mime = String(blob.type || response.headers?.get?.('content-type') || '').split(';')[0].toLowerCase();
         const extension = IMAGE_TYPES.get(mime);
         if (!extension) throw new Error('Artwork uses an unsupported image format.');
+        if (command.intent === 'token') {
+          if (mime !== 'image/png' || blob.size > 6 * 1024 * 1024) throw new Error('Invalid generated token image.');
+          const fingerprint = [...new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))]
+            .map(byte => byte.toString(16).padStart(2, '0')).join('');
+          if (fingerprint !== command.entry.artworkFingerprint) throw new Error('The generated token changed. Send it again from Viscanon.');
+        }
         const dimensions = await imageDimensions(blob);
         assertGM();
         if (!Number.isFinite(dimensions.width) || !Number.isFinite(dimensions.height)
@@ -186,6 +194,7 @@ export function createWorkspaceActions({
           || dimensions.width * dimensions.height > 100_000_000) {
           throw new Error('Artwork dimensions are not supported by Foundry.');
         }
+        if (command.intent === 'token' && (dimensions.width !== 1024 || dimensions.height !== 1024)) throw new Error('Generated tokens must be 1024 × 1024 pixels.');
         return { blob, mime, extension, dimensions };
       } finally {
         clearTimeout(timeout);
@@ -287,6 +296,38 @@ export function createWorkspaceActions({
 
   async function ensureSceneFolder(command) {
     assertGM();
+    if (command.entry.sceneOrganization !== undefined) {
+      const plan = await sceneFolderPlan(command, globalThis.CONST?.FOLDER_MAX_DEPTH);
+      assertGM();
+      const folders = () => world.folders?.contents ?? [];
+      const roots = folders().filter(folder => folder.type === 'Scene' && folderParentId(folder) === null);
+      let parent = roots.find(folder => folderFlag(folder, 'workspaceFolder') === 'root')
+        ?? roots.find(folder => folder.name === 'Viscanon' && !folderFlag(folder, 'workspaceFolder'))
+        ?? await ensureFolder('Scene');
+      assertGM();
+      for (const step of plan.steps) {
+        // Identity survives user renames. Same-title locations are never guessed
+        // from unmarked folders, and no existing Folder is updated or moved.
+        const children = folders().filter(folder => folder.type === 'Scene' && folderParentId(folder) === parent.id);
+        const existing = children.find(folder => folderFlag(folder, 'folderKey') === step.key
+          && folderFlag(folder, 'workspaceFolder') === step.role);
+        let name = step.name;
+        if (!existing && step.role === 'location' && children.some(folder => folder.name === name)) {
+          // Distinct canonical paths may have the same full display label. Add
+          // an opaque suffix only to the new colliding folder; never rename or
+          // adopt the GM's existing folder by its label.
+          name = [8, 12, 16, 24, 32, 64].map(length => `${step.name} [${step.key.slice(0, length)}]`)
+            .find(candidate => !children.some(folder => folder.name === candidate));
+          if (!name) throw new Error('A location folder name conflicts with an existing folder. Rename that folder before trying again.');
+        }
+        parent = existing ?? await globalThis.CONFIG.Folder.documentClass.create({name, type: 'Scene', folder: parent.id,
+          flags: {[MODULE_ID]: {workspaceFolder: step.role, folderKey: step.key}}});
+        assertGM();
+        if (!parent) throw new Error('Foundry did not create the Scene folder.');
+      }
+      return {folder: parent, notice: plan.notice};
+    }
+    // Compatibility with an older backend that has no canonical location path.
     const folders = () => world.folders?.contents ?? [];
     // Reuse an existing Viscanon root without renaming, flagging or moving it.
     const roots = folders().filter(folder => folder.type === 'Scene'
@@ -306,7 +347,7 @@ export function createWorkspaceActions({
     if (chapter) parent = await child(chapter, 'chapter', keys?.chapter);
     const category = {location:'Locations',character:'Characters',scene:'Scenes'}[command.entry.type];
     if (!category) throw new Error('Unsupported entry type.');
-    return child(category, 'category', keys?.category);
+    return {folder: await child(category, 'category', keys?.category), notice: ''};
   }
 
   function getPins(campaignId) {
@@ -544,6 +585,7 @@ export function createWorkspaceActions({
 
   async function revealArtwork(command) {
     assertGM();
+    if (command.intent === 'token') throw new Error('Use Attach token to actor for this request.');
     const current = await assertActionCurrent(command);
     const receipt = await revealViscanon(current);
     assertGM();
@@ -560,22 +602,28 @@ export function createWorkspaceActions({
 
   async function createScene(command, allowPublicArtwork = false) {
     assertGM();
+    if (command.intent === 'token') throw new Error('Use Attach token to actor for this request.');
     if (!allowPublicArtwork) throw new Error(PUBLIC_FILE_WARNING);
     const major = Number(world.release?.generation ?? String(world.version).split('.')[0]);
     if (!Number.isFinite(major) || major < 13 || major > 14) throw new Error('This Foundry version is not supported.');
     const saved = await saveArtwork(command, 'image', { disclosedToPlayers: true,
       checkCurrentAction: true });
     const current = await assertActionCurrent(command);
-    const folder = await ensureSceneFolder(current);
+    const folderIdentity = sceneOrganizationIdentity(current.entry);
+    const {folder, notice} = await ensureSceneFolder(current);
     const data = sceneCreateData({ ...current.entry, title: entryDocumentName(current.entry) }, saved.path, saved.dimensions, major);
     data.folder = folder.id;
     data.ownership = { default: 0 };
     const verified = await assertActionCurrent(command);
+    if (folderIdentity !== sceneOrganizationIdentity(verified.entry)) {
+      throw new Error('This entry’s location changed. Send it again before creating a Scene.');
+    }
     data.name = entryDocumentName(verified.entry);
     data.navName = entryName(verified.entry);
     data.flags = { [MODULE_ID]: numberedNameFlag(verified.entry) };
     const scene = await globalThis.CONFIG.Scene.documentClass.create(data);
     if (!scene) throw new Error('Foundry did not create the scene.');
+    if (notice) globalThis.ui?.notifications?.warn?.(notice);
     return scene;
   }
 
@@ -588,6 +636,7 @@ export function createWorkspaceActions({
 
   async function placePin(command, sceneId, visibility) {
     assertGM();
+    if (command.intent === 'token') throw new Error('Use Attach token to actor for this request.');
     if (!Object.values(PIN_VISIBILITY).includes(visibility)) throw new Error('Choose a pin visibility.');
     const scene = world.scenes?.get(sceneId);
     if (board?.scene?.id !== sceneId) throw new Error('Open the map you want to place a pin on.');
@@ -656,6 +705,7 @@ export function createWorkspaceActions({
 
   async function linkExistingPin(command, journalId) {
     assertGM();
+    if (command.intent === 'token') throw new Error('Use Attach token to actor for this request.');
     const choices=legacyPins();
     if (!choices.length) throw new Error('There are no older hidden pins that need an artwork link.');
     if (journalId===undefined) {
@@ -765,6 +815,7 @@ export function createWorkspaceActions({
   async function attachActor(command, actorId, newType = '', allowPlayerVisibility = false,
     allowPublicArtwork = false) {
     assertGM();
+    if (command.intent === 'token') throw new Error('Use Attach token to actor for this request.');
     if (actorId) {
       const actor = world.actors?.get(actorId);
       if (!actor) throw new Error('Choose an existing actor.');
@@ -798,7 +849,59 @@ export function createWorkspaceActions({
     return actor;
   }
 
+  async function attachToken(command, actorId, newType = '', allowPlayerVisibility = false, allowPublicArtwork = false) {
+    assertGM();
+    if (command.intent !== 'token') throw new Error('Send a generated token from Viscanon first.');
+    if (!allowPublicArtwork) throw new Error(PUBLIC_FILE_WARNING);
+    const choice = JSON.stringify([actorId || '', actorId ? '' : newType]);
+    const existing = tokenAttachments.get(command.id);
+    if (existing) {
+      if (existing.choice !== choice) throw new Error('This token request already has an actor target. Send it again to choose another.');
+      return existing.job;
+    }
+    const record = {choice, committing:false, job:null};
+    record.job = Promise.resolve().then(async () => {
+      const actor = actorId ? world.actors?.get(actorId) : null;
+      if (actorId && !actor) throw new Error('Choose an existing actor.');
+      if (!actorId && !actorTypes().includes(newType)) throw new Error('Choose an actor type supported by this game system.');
+      const verify = async () => {
+        const fresh = await assertActionCurrent(command);
+        if (actor && world.actors?.get(actorId) !== actor) throw new Error('This actor changed. Choose it again.');
+        if (actor && actorVisibleToPlayers(actor) && !allowPlayerVisibility && fresh.entry.revealed !== true) {
+          throw new Error('This actor is visible to players. Reveal the source artwork in Viscanon first, or choose a private actor.');
+        }
+        return fresh;
+      };
+      await verify();
+      const saved = await saveArtwork(command, 'image', {disclosedToPlayers:true,checkCurrentAction:true,beforeUpload:async()=>{await verify();return true;}});
+      const folder = actor ? null : await ensureFolder('Actor');
+      const current = await verify();
+      record.committing = true;
+      try {
+        if (actor) {
+          // Update only the prototype image. Portrait, token settings and placed
+          // Scene tokens remain exactly as the GM configured them.
+          await actor.update({'prototypeToken.texture.src':saved.path});
+          return actor;
+        }
+        const created = await globalThis.CONFIG.Actor.documentClass.create({name:entryName(current.entry),type:newType,
+          folder:folder.id,ownership:{default:0},prototypeToken:{texture:{src:saved.path}}});
+        if (!created) throw new Error('Actor creation was not confirmed.');
+        return created;
+      } catch {
+        throw new Error('Token attachment is unconfirmed. Check the actor in Foundry before sending another request.');
+      }
+    }).catch(error => {
+      // Upload/validation failures may retry. Once a document mutation was
+      // attempted, uncertainty must never create or attach a second time.
+      if (!record.committing) tokenAttachments.delete(command.id);
+      throw error;
+    });
+    tokenAttachments.set(command.id, record);
+    return record.job;
+  }
+
   return { assertFresh, prefetchArtwork, saveArtwork, releaseArtwork,
     revealArtwork, createScene, viewScene, placePin, cancelPinPlacement, legacyPins, linkExistingPin, activatePin, destroy,
-    getPins, reconcilePins, promotePins, actorTypes, attachActor };
+    getPins, reconcilePins, promotePins, actorTypes, attachActor, attachToken };
 }
