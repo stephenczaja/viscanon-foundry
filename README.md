@@ -1,6 +1,6 @@
 # Viscanon Foundry module development source
 
-Viscanon 0.2.7 gives players scene labels without the GM's scene-number prefix, opens newly created scenes in the initiating GM's view, and names new actors after their current Viscanon entry. The four workspace cards have equal heights, with Pin visibility directly above its dropdown. Existing actor names, document permissions, and other users' views are preserved. This module-only release uses the existing backend and database. Real Foundry 14 GM and player acceptance remains user testing.
+Viscanon 0.2.8 clarifies the artwork popup and separates Create new actor from Select an actor. Existing actors are sorted alphabetically, and an attachment keeps its selected actor while authorization is checked. This module-only UI update uses the existing backend and database. It does not add token sending, new Scene folders, or cleanup jobs. Real Foundry 14 GM and player acceptance remains post-publication user testing.
 
 ## Install and connect
 
@@ -17,7 +17,7 @@ When Viscanon sends an entry, the active GM gets a Foundry popup with four actio
 - **Reveal artwork** reveals the canonical artwork in Viscanon, then sends that same authorized reveal event to connected Foundry players. The existing receivers deduplicate concurrent polling and socket delivery. Failure to confirm the backend reveal does not produce a local-only share.
 - **Place map pin** uses the currently viewed scene and attaches a preview to the cursor until the GM clicks. Escape, right-click, closing the popup, changing scenes, or losing GM authority cancels placement. The transparent Viscanon eye is linked to an image Journal. **Will appear on reveal** starts GM-only and becomes player-visible after a Viscanon reveal or this popup's local artwork reveal. **GM only** stays hidden. **Visible to players** exposes it immediately with a public or generic title.
 - **Create scene** uses the artwork displayed in the popup. The scene uses its actual image dimensions, a gridless canvas, and a black background. It starts inactive and GM-only.
-- **Attach to actor** searches existing world actors or creates a new actor using a type supported by the game system. Existing player-visible actors require the artwork to be currently revealed in Viscanon. The action rechecks this before upload and before updating only the portrait; ownership, tokens, and other actor data remain unchanged. A new actor starts GM-only.
+- **Attach artwork to actor** separates **Create new actor** from **Select an actor**. The existing-actor list is sorted alphabetically; creation uses a type supported by the game system. Existing player-visible actors require the artwork to be currently revealed in Viscanon. The action rechecks this before upload and before updating only the portrait; ownership, tokens, and other actor data remain unchanged. A new actor starts GM-only.
 
 Unrevealed pins and private scenes and actors stay in the neutral **Viscanon** root folder. Pins that the GM explicitly makes visible, or that a fresh Viscanon reveal authorizes, are grouped under neutral **Section** and **Group** folders keyed from stable chapter and entry-category identifiers. Folder names contain neither private titles nor raw Viscanon IDs. This preserves the chapter/category structure for exposed pins, including renames and GM failover, but private document nesting still needs a real player-account test of Foundry folder visibility and metadata. Player-visible pins use the neutral title **Viscanon artwork**; a GM may rename a visible Journal manually.
 
@@ -50,3 +50,8 @@ New scenes retain the scene-number prefix for GM organization and set Foundry's 
 Create scene opens the new scene for the initiating active GM using `Scene.view()`. It leaves world activation, other users' views, navigation visibility, and ownership unchanged. Repeated clicks in the same popup reuse the created scene; a view failure reports that creation succeeded and allows a view retry.
 
 New actors use the current entry name, without scene numbering or artwork revision names. Attaching artwork to an existing actor changes only its portrait. The four workspace action cards use equal-height rows, and Pin visibility sits directly above its dropdown beside the larger icon preview.
+
+
+### 0.2.8 actor controls and popup wording
+
+Create mode shows only the actor-type dropdown. Select mode shows only the existing-actor dropdown, and cannot create an actor when no selection is available. Mode and actor controls lock while the existing authorization check runs. The chosen actor is captured before that asynchronous check, so a later UI change cannot redirect the attachment. Existing portraits, ownership, token settings and backend APIs retain their established behavior. The reveal and map-pin descriptions explain the current popup and double-click behavior.
