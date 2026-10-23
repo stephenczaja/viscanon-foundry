@@ -103,7 +103,8 @@ export function createWorkspaceActions({
   filePicker = foundryApi.applications.apps.FilePicker,
   imageBitmap = globalThis.createImageBitmap,
   endpoint = DEFAULT_ENDPOINT,
-  canvas: board = globalThis.canvas,
+  canvas: board,
+  getCanvas = () => board ?? globalThis.canvas,
   verifyPinVisibility = async () => false,
   checkAction = async () => { throw new Error('Foundry cannot verify this request.'); },
   revealViscanon = async () => { throw new Error('Update the Viscanon bridge backend before revealing artwork.'); },
@@ -118,7 +119,7 @@ export function createWorkspaceActions({
   let pinCursor = 0;
   let destroyed = false;
   const privatePopouts = new Set();
-  const { captureMapPoint, cancelPinPlacement } = createPinPlacement({ board, assertGM, icon: PIN_ICON });
+  const { captureMapPoint, cancelPinPlacement } = createPinPlacement({ getBoard: getCanvas, assertGM, icon: PIN_ICON });
 
   function assertGM() {
     if (destroyed || !boundUserId || world.user?.id !== boundUserId || !world.user?.isGM
@@ -590,21 +591,34 @@ export function createWorkspaceActions({
     assertGM();
     if (!Object.values(PIN_VISIBILITY).includes(visibility)) throw new Error('Choose a pin visibility.');
     const scene = world.scenes?.get(sceneId);
-    if (board?.scene?.id !== sceneId) throw new Error('Open the map you want to place a pin on.');
+    const canvas = getCanvas();
+    if (!sceneId || canvas?.scene?.id !== sceneId) throw new Error('Open the map you want to place a pin on.');
     if (!scene) throw new Error('Choose an existing Foundry scene.');
+    const assertPlacementScene = () => {
+      assertGM();
+      if (getCanvas() !== canvas || canvas.scene?.id !== scene.id || world.scenes?.get(scene.id) !== scene)
+        throw new Error('The viewed map changed. Choose Place map pin again on the current scene.');
+      if (scene.canUserModify?.(world.user, 'update') === false)
+        throw new Error('You do not have permission to place a pin on this scene.');
+    };
+    assertPlacementScene();
     const position = await captureMapPoint(scene, {icon:PIN_ICONS[visibility],label:PIN_LABELS[visibility]});
     if (!position) return null;
     await assertActionCurrent(command);
+    assertPlacementScene();
     // The popup's revealed snapshot may already be stale after an Undo. Only
     // the fresh fingerprint reconciliation may promote an on-reveal pin.
     const exposed = visibility === PIN_VISIBILITY.visible;
     const folderKeys = exposed ? await folderKeysFor(command) : null;
+    assertPlacementScene();
     // Foundry serves persistent files to players regardless of Journal
     // ownership. An unrevealed pin contains only this public module icon.
     const saved = exposed ? await saveArtwork(command, 'image', {
       disclosedToPlayers: true, checkCurrentAction: true }) : null;
     await assertActionCurrent(command);
+    assertPlacementScene();
     const folder = await ensureFolder('JournalEntry', exposed ? folderKeys : null);
+    assertPlacementScene();
     const ownership = { default: exposed ? ownerLevel() : 0 };
     const pinFlags = visibility === PIN_VISIBILITY.onReveal
       ? { visibility, campaignId: command.campaignId, entryId: command.entry.id,
@@ -614,6 +628,7 @@ export function createWorkspaceActions({
         ...(visibility===PIN_VISIBILITY.gmOnly ? {campaignId:command.campaignId,entryId:command.entry.id,
           artworkFingerprint:command.entry.artworkFingerprint} : {}) };
     const current = await assertActionCurrent(command);
+    assertPlacementScene();
     const name = entryDocumentName(current.entry);
     // The requested document name lives only in Foundry's permission-controlled
     // Journal/page name fields, never in the globally replicated Note or flags.
@@ -625,20 +640,37 @@ export function createWorkspaceActions({
       flags: { [MODULE_ID]: pinFlags }
     });
     if (!journal) throw new Error('Foundry did not create the pin journal.');
+    let notes;
     try {
       const pageId = journal.pages?.contents?.[0]?.id;
       if (!pageId) throw new Error('Foundry did not create the pin artwork page.');
       await assertActionCurrent(command);
-      const notes = await scene.createEmbeddedDocuments('Note', [{
+      assertPlacementScene();
+      notes = await scene.createEmbeddedDocuments('Note', [{
         entryId: journal.id, pageId, ...position, global: true, iconSize: 48,
         texture: { src: PIN_ICONS[visibility] }, flags: { [MODULE_ID]: { mapPin: true } }
       }]);
       if (!notes?.length) throw new Error('Foundry did not create the map pin.');
+      assertPlacementScene();
       return { journal, note: notes[0], folderStatus: exposed
         ? folderKeys ? 'nested' : 'unavailable' : 'private' };
     } catch (error) {
       // The only document this operation created is safe to remove if pin creation failed.
-      if (world.user?.id === boundUserId && world.user?.isGM) await journal.delete();
+      if (world.user?.id === boundUserId && world.user?.isGM) {
+        const cleanupErrors=[];
+        if (notes?.length) {
+          try {
+            const ids=notes.map(note => note.id);
+            if (ids.some(id => typeof id !== 'string' || !id) || new Set(ids).size !== ids.length)
+              throw new Error('Foundry did not return unique IDs for the new map pin.');
+            await scene.deleteEmbeddedDocuments('Note', ids);
+          }
+          catch (cleanupError) { cleanupErrors.push(cleanupError); }
+        }
+        try { await journal.delete(); } catch (cleanupError) { cleanupErrors.push(cleanupError); }
+        if (cleanupErrors.length) throw new AggregateError([error,...cleanupErrors],
+          'Map pin placement failed and its new documents could not be fully removed. Check this scene before trying again.');
+      }
       throw error;
     }
   }
