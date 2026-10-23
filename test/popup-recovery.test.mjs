@@ -20,7 +20,13 @@ function placementFixture() {
   view.getBoundingClientRect = () => ({ left: 10, top: 20, width: 400, height: 300 });
   const scene = { id: 'scene', width: 800, height: 600 };
   const board = { scene, dimensions: { sceneRect: { x: 100, y: 50, width: 800, height: 600 } },
-    app: { view, renderer: { width: 800, height: 600 } }, stage: { toLocal: p => ({ x: p.x + 100, y: p.y + 50 }) } };
+    app: { view, renderer: { width: 800, height: 600, screen: {width:800,height:600} } },
+    stage: { toLocal: p => ({ x: p.x + 100, y: p.y + 50 }) },
+    canvasCoordinatesFromClient({x,y}) {
+      const rect=view.getBoundingClientRect(),screen=this.app.renderer.screen;
+      return this.stage.toLocal({x:(x-rect.left)*screen.width/rect.width,
+        y:(y-rect.top)*screen.height/rect.height});
+    } };
   let active = true;
   const hooks = { on(name, fn) { subscriptions.set(name, fn); return name; }, off(name) { subscriptions.delete(name); } };
   const placement = createPinPlacement({ board, document: doc, hooks, icon: PIN_ICON,

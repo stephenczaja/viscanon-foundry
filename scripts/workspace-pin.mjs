@@ -22,7 +22,8 @@ export function createPinPlacement({ board, getBoard = () => board ?? globalThis
     const board = getBoard();
     if (!scene || board?.scene?.id !== scene.id) throw new Error('Open a map in Foundry before placing a pin.');
     const view = board?.app?.view ?? board?.app?.renderer?.view;
-    if (!view?.addEventListener || !board.stage?.toLocal) throw new Error('Foundry map placement is unavailable.');
+    if (!view?.addEventListener || typeof board.canvasCoordinatesFromClient !== 'function')
+      throw new Error('Foundry map placement is unavailable.');
     cancelPinPlacement();
     return new Promise((resolve, reject) => {
       const preview = doc.createElement?.('img');
@@ -74,12 +75,9 @@ export function createPinPlacement({ board, getBoard = () => board ?? globalThis
         try {
           assertGM();
           if (getBoard() !== board || board.scene?.id !== scene.id) { cancelPinPlacement(); return; }
-          const rect = view.getBoundingClientRect();
-          const renderer = board.app.renderer;
-          const point = board.stage.toLocal({
-            x: (event.clientX - rect.left) * renderer.width / rect.width,
-            y: (event.clientY - rect.top) * renderer.height / rect.height
-          });
+          // Foundry owns client-to-scene conversion, including renderer
+          // resolution, CSS size, zoom and pan. Backing pixels are not stage units.
+          const point = board.canvasCoordinatesFromClient({ x: event.clientX, y: event.clientY });
           const bounds = board.dimensions?.sceneRect ?? { x: 0, y: 0, width: scene.width, height: scene.height };
           if (!Number.isFinite(point.x) || !Number.isFinite(point.y)
             || point.x < bounds.x || point.y < bounds.y
