@@ -1,6 +1,6 @@
 # Viscanon Foundry module development source
 
-Viscanon 0.2.8 clarifies the artwork popup and separates Create new actor from Select an actor. Existing actors are sorted alphabetically, and an attachment keeps its selected actor while authorization is checked. This module-only UI update uses the existing backend and database. It does not add token sending, new Scene folders, or cleanup jobs. Real Foundry 14 GM and player acceptance remains post-publication user testing.
+Viscanon 0.2.9 corrects map-pin coordinates on high-resolution displays using Foundry's native client-to-canvas conversion. Placement resolves the current canvas and rejects stale coordinates after a scene change; a late change removes only the newly created pin documents. The connection dialog uses shorter instructions and success copy. This module-only update uses the existing backend and database. It does not add token sending, new Scene folders, or cleanup jobs. Real Foundry 14 GM and player acceptance remains post-publication user testing.
 
 ## Install and connect
 
@@ -55,3 +55,9 @@ New actors use the current entry name, without scene numbering or artwork revisi
 ### 0.2.8 actor controls and popup wording
 
 Create mode shows only the actor-type dropdown. Select mode shows only the existing-actor dropdown, and cannot create an actor when no selection is available. Mode and actor controls lock while the existing authorization check runs. The chosen actor is captured before that asynchronous check, so a later UI change cannot redirect the attachment. Existing portraits, ownership, token settings and backend APIs retain their established behavior. The reveal and map-pin descriptions explain the current popup and double-click behavior.
+
+### 0.2.9 map-pin coordinates and connection copy
+
+Pin placement uses Foundry's native client-to-canvas conversion rather than renderer backing-pixel dimensions. The existing padded-scene bounds check remains, including rejection of invalid coordinates. A newly available or replaced canvas is resolved when placement begins. Scene changes during placement cancel it; changes after the click reject stale coordinates, removing only this operation's newly created Note and Journal if necessary. Existing pins, GM authorization, and all three pin visibility modes retain their behavior.
+
+The connection dialog now gives one instruction for pairing, reports “Connected.” when both capabilities are ready, and omits the explanatory paragraph below the buttons. Partial connections and failures retain their specific messages. Automated synthetic checks do not replace in-world GM/player acceptance on the affected display and scene.
