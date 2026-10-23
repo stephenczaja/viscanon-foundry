@@ -20,7 +20,13 @@ function placementFixture() {
   view.getBoundingClientRect = () => ({ left: 10, top: 20, width: 400, height: 300 });
   const scene = { id: 'scene', width: 800, height: 600 };
   const board = { scene, dimensions: { sceneRect: { x: 100, y: 50, width: 800, height: 600 } },
-    app: { view, renderer: { width: 800, height: 600 } }, stage: { toLocal: p => ({ x: p.x + 100, y: p.y + 50 }) } };
+    app: { view, renderer: { width: 800, height: 600, screen: {width:800,height:600} } },
+    stage: { toLocal: p => ({ x: p.x + 100, y: p.y + 50 }) },
+    canvasCoordinatesFromClient({x,y}) {
+      const rect=view.getBoundingClientRect(),screen=this.app.renderer.screen;
+      return this.stage.toLocal({x:(x-rect.left)*screen.width/rect.width,
+        y:(y-rect.top)*screen.height/rect.height});
+    } };
   let active = true;
   const hooks = { on(name, fn) { subscriptions.set(name, fn); return name; }, off(name) { subscriptions.delete(name); } };
   const placement = createPinPlacement({ board, document: doc, hooks, icon: PIN_ICON,
@@ -79,7 +85,7 @@ test('transparent note styling changes only Viscanon note decorations', () => {
 });
 
 function actionFixture() {
-  const before = Object.fromEntries(['document', 'CONFIG', 'ui'].map(key => [key, globalThis[key]]));
+  const before = Object.fromEntries(['document', 'CONFIG', 'ui', 'canvas'].map(key => [key, globalThis[key]]));
   const fx = placementFixture(), journals = [], uploads = [], popouts = [], notifications = [], actorUpdates = [], createdScenes = [], requestedImages = [];
   globalThis.document = fx.doc;
   globalThis.ui = { notifications: { error: text => notifications.push(text), info() {} } };
@@ -117,7 +123,7 @@ function actionFixture() {
     async close() { this._onClose?.({}); }
     _onClose() {}
   }
-  const makeActions = () => { const actions = createWorkspaceActions({ game: world, canvas: fx.board,
+  const makeActions = ({ nativeCanvas = false } = {}) => { const actions = createWorkspaceActions({ game: world, ...(!nativeCanvas ? {canvas: fx.board} : {}),
     foundry: { applications: { apps: { ImagePopout }, api: { DialogV2: { async input(options) {dialogs.push(options);return dialogAnswer;} } } } },
     checkAction: async proof => { await beforeCheck(); return { ...command, id: proof.id, entry: { ...command.entry, revealed: currentRevealed } }; },
     fetchPinArtwork: async proof => { pinReads.push(proof); await beforePinRead(pinReads.length); return {...command,entry:{...command.entry,revealed:currentRevealed}}; },
@@ -131,6 +137,106 @@ function actionFixture() {
     answerDialog(value) {dialogAnswer=value;}, onCheck(fn) { beforeCheck=fn; }, onPinRead(fn) { beforePinRead=fn; },
     restore() { instances.forEach(actions=>actions.destroy()); for (const [key, value] of Object.entries(before)) globalThis[key] = value; } };
 }
+
+for (const start of ['same-scene', 'switched-scene', 'before-canvas-ready', 'replaced-canvas']) {
+  test(`pin placement uses the current native canvas: ${start}`, async () => {
+    const fx=actionFixture();
+    try {
+      globalThis.canvas=start==='before-canvas-ready' ? undefined : fx.board;
+      const actions=fx.makeActions({nativeCanvas:true});
+      const notes=[];
+      const scene={...fx.scene,id:['replaced-canvas','switched-scene'].includes(start)?'new-scene':fx.scene.id,
+        async createEmbeddedDocuments(_type,data){notes.push(...data);return data;}};
+      fx.world.scenes.get=id=>id===scene.id?scene:null;
+      if (['same-scene','switched-scene'].includes(start)) {
+        fx.board.scene=scene;globalThis.canvas=fx.board;
+      } else globalThis.canvas={...fx.board,scene};
+      const pending=actions.placePin(fx.command,scene.id,'gm_only');
+      const outcome=pending.then(value=>({value}),error=>({error}));
+      fx.view.fire('pointerdown',{clientX:110,clientY:120});
+      const result=await outcome;
+      assert.equal(result.error,undefined,result.error?.message);
+      assert(result.value);assert.equal(notes.length,1);
+      assert.deepEqual({x:notes[0].x,y:notes[0].y},{x:300,y:250});
+      assert.equal(fx.uploads.length,0,'private placement never uploads artwork');
+      assert.equal(fx.journals[0].ownership.default,0);
+    } finally {fx.restore();}
+  });
+}
+
+test('a scene switch after the placement click rejects stale coordinates before document creation',async()=>{
+  const fx=actionFixture();
+  try {
+    let notes=0;fx.scene.createEmbeddedDocuments=async()=>{notes++;return [{}];};
+    fx.onCheck(()=>{fx.board.scene={id:'switched-scene'};});
+    const pending=fx.actions.placePin(fx.command,fx.scene.id,'gm_only');
+    fx.view.fire('pointerdown',{clientX:110,clientY:120});
+    await assert.rejects(pending,/scene|map/i);
+    assert.equal(notes,0);assert.equal(fx.journals.length,0);assert.equal(fx.uploads.length,0);
+  }finally{fx.restore();}
+});
+
+for (const reason of ['cancel','scene-switch-before-click']) {
+  test(`pin placement ${reason} leaves no journal, upload or existing-pin change`,async()=>{
+    const fx=actionFixture();
+    try {
+      let writes=0;fx.scene.createEmbeddedDocuments=async()=>{writes++;return [{}];};
+      const pending=fx.actions.placePin(fx.command,fx.scene.id,'gm_only');
+      if(reason==='cancel')fx.actions.cancelPinPlacement();
+      else {fx.board.scene={id:'other'};fx.view.fire('pointerdown',{clientX:110,clientY:120});}
+      assert.equal(await pending,null);assert.equal(writes,0);assert.equal(fx.journals.length,0);assert.equal(fx.uploads.length,0);
+      assert.equal(fx.view.listeners.size,0);
+    }finally{fx.restore();}
+  });
+}
+
+test('late scene switch rolls back only the new Note and journal, preserving existing pins',async()=>{
+  const fx=actionFixture();
+  try {
+    const existing={id:'existing-note'},notes=[existing],removed=[];
+    const create=CONFIG.JournalEntry.documentClass.create;
+    CONFIG.JournalEntry.documentClass.create=async data=>{
+      const journal=await create(data);journal.delete=async()=>{journal.deleted=true;};return journal;
+    };
+    fx.scene.createEmbeddedDocuments=async(_type,data)=>{
+      const note={...data[0],id:'new-note'};notes.push(note);fx.board.scene={id:'other'};return[note];
+    };
+    fx.scene.deleteEmbeddedDocuments=async(type,ids)=>{
+      assert.equal(type,'Note');removed.push(...ids);
+      for(const id of ids)notes.splice(notes.findIndex(note=>note.id===id),1);
+    };
+    const pending=fx.actions.placePin(fx.command,fx.scene.id,'gm_only');
+    fx.view.fire('pointerdown',{clientX:110,clientY:120});
+    await assert.rejects(pending,/viewed map changed/);
+    assert.deepEqual(removed,['new-note']);assert.deepEqual(notes,[existing]);
+    assert.equal(fx.journals.length,1);assert.equal(fx.journals[0].deleted,true);assert.equal(fx.uploads.length,0);
+  }finally{fx.restore();}
+});
+
+test('a settled placement handler cannot cancel a later placement or reuse its coordinates',async()=>{
+  const fx=placementFixture();
+  const first=fx.captureMapPoint(fx.scene),oldClick=fx.view.listeners.get('pointerdown');
+  oldClick({clientX:110,clientY:120,preventDefault(){},stopImmediatePropagation(){}});
+  assert.deepEqual(await first,{x:300,y:250});
+  const second=fx.captureMapPoint(fx.scene);
+  oldClick({clientX:310,clientY:220,preventDefault(){},stopImmediatePropagation(){}});
+  assert.equal(fx.previews[1].removed,undefined);
+  fx.view.fire('pointerdown',{clientX:60,clientY:70});
+  assert.deepEqual(await second,{x:200,y:150});assert.equal(fx.previews[1].removed,true);
+});
+
+test('missing or unauthorized current scene rejects before placement, journals or artwork uploads',async()=>{
+  const fx=actionFixture();
+  try {
+    fx.board.scene=null;
+    await assert.rejects(fx.actions.placePin(fx.command,undefined,'gm_only'),/scene|map/i);
+    fx.board.scene=fx.scene;fx.scene.canUserModify=()=>false;
+    const denied=fx.actions.placePin(fx.command,fx.scene.id,'gm_only');
+    denied.catch(()=>{});fx.actions.cancelPinPlacement();
+    await assert.rejects(denied,/permission|scene|map/i);
+    assert.equal(fx.view.listeners.size,0);assert.equal(fx.journals.length,0);assert.equal(fx.uploads.length,0);
+  }finally{fx.restore();}
+});
 
 test('a hidden pin opens actual artwork privately for its GM; no private URL enters Foundry documents or sockets', async () => {
   const fx = actionFixture();

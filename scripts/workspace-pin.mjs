@@ -13,15 +13,17 @@ export function styleWorkspaceNote(note) {
   if (note.controlIcon?.border) note.controlIcon.border.visible = false;
 }
 
-export function createPinPlacement({ board, assertGM, icon, document: doc = globalThis.document,
+export function createPinPlacement({ board, getBoard = () => board ?? globalThis.canvas, assertGM, icon, document: doc = globalThis.document,
   hooks = globalThis.Hooks } = {}) {
   let cancel;
   function cancelPinPlacement() { cancel?.(); }
   function captureMapPoint(scene, { icon: placementIcon = icon, label = '' } = {}) {
     assertGM();
+    const board = getBoard();
     if (!scene || board?.scene?.id !== scene.id) throw new Error('Open a map in Foundry before placing a pin.');
     const view = board?.app?.view ?? board?.app?.renderer?.view;
-    if (!view?.addEventListener || !board.stage?.toLocal) throw new Error('Foundry map placement is unavailable.');
+    if (!view?.addEventListener || typeof board.canvasCoordinatesFromClient !== 'function')
+      throw new Error('Foundry map placement is unavailable.');
     cancelPinPlacement();
     return new Promise((resolve, reject) => {
       const preview = doc.createElement?.('img');
@@ -35,7 +37,10 @@ export function createPinPlacement({ board, assertGM, icon, document: doc = glob
       const oldCursor = view.style?.cursor;
       if (view.style) view.style.cursor = 'crosshair';
       const hookIds = [];
+      let settled = false;
       const finish = (value, error) => {
+        if (settled) return;
+        settled = true;
         view.removeEventListener('pointerdown', click, true);
         view.removeEventListener('pointermove', move, true);
         view.removeEventListener('pointerleave', leave, true);
@@ -56,7 +61,7 @@ export function createPinPlacement({ board, assertGM, icon, document: doc = glob
       const leave = () => { if (preview) preview.hidden = true; };
       const move = event => {
         try { assertGM(); } catch (error) { finish(null, error); return; }
-        if (board.scene?.id !== scene.id) { cancelPinPlacement(); return; }
+        if (getBoard() !== board || board.scene?.id !== scene.id) { cancelPinPlacement(); return; }
         if (preview) {
           preview.hidden = false;
           preview.style.left = `${event.clientX}px`;
@@ -69,13 +74,10 @@ export function createPinPlacement({ board, assertGM, icon, document: doc = glob
         if (event.button != null && event.button !== 0) return;
         try {
           assertGM();
-          if (board.scene?.id !== scene.id) { cancelPinPlacement(); return; }
-          const rect = view.getBoundingClientRect();
-          const renderer = board.app.renderer;
-          const point = board.stage.toLocal({
-            x: (event.clientX - rect.left) * renderer.width / rect.width,
-            y: (event.clientY - rect.top) * renderer.height / rect.height
-          });
+          if (getBoard() !== board || board.scene?.id !== scene.id) { cancelPinPlacement(); return; }
+          // Foundry owns client-to-scene conversion, including renderer
+          // resolution, CSS size, zoom and pan. Backing pixels are not stage units.
+          const point = board.canvasCoordinatesFromClient({ x: event.clientX, y: event.clientY });
           const bounds = board.dimensions?.sceneRect ?? { x: 0, y: 0, width: scene.width, height: scene.height };
           if (!Number.isFinite(point.x) || !Number.isFinite(point.y)
             || point.x < bounds.x || point.y < bounds.y

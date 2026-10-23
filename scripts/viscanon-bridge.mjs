@@ -125,7 +125,7 @@ function connectionStatus() {
   if (!currentWorkspaceCredential()) return { state: 'connected', message:
     'Artwork connected. Send to Foundry is unavailable on this GM browser; pair with a new VC2 code to enable it.' };
   const send = workspace?.status;
-  if (send?.state === 'connected') return { state: 'connected', message: 'Connected. Artwork and Send to Foundry are ready.' };
+  if (send?.state === 'connected') return { state: 'connected', message: 'Connected.' };
   if (send?.state === 'listening') return { state: 'connected', message:
     'Artwork connected. The active GM receives Send to Foundry requests.' };
   return { state: send?.state || 'connecting', message:
@@ -436,7 +436,7 @@ function createSettingsApplication() {
       const body = document.createElement('div');
       body.className = 'viscanon-bridge-body';
       const intro = document.createElement('p');
-      intro.textContent = 'In Viscanon Campaign Settings, create a Foundry connection code. Paste it here once to pair this world for artwork and Send to Foundry.';
+      intro.textContent = 'In Campaign Settings in Viscanon, create a Foundry connection code. Paste it below to pair this world and enable the Send to Foundry button on Viscanon entries.';
       const status = document.createElement('p');
       status.className = 'viscanon-bridge-status';
       status.setAttribute('role', 'status');
@@ -468,10 +468,7 @@ function createSettingsApplication() {
         button.textContent = text;
         buttons.append(button);
       }
-      const note = document.createElement('p');
-      note.className = 'viscanon-bridge-note';
-      note.textContent = 'Keep an active GM online for Send to Foundry. Shared artwork is available to this world’s players. The private Send credential stays in this GM account’s browser and is cleared if the account changes. A legacy 64-character code alone receives artwork only.';
-      body.append(intro, status, label, input, buttons, note);
+      body.append(intro, status, label, input, buttons);
       content.append(banner, body);
       return content;
     }
